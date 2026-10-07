@@ -46,3 +46,21 @@ is the lock — a claim becomes atomic at the push, not the commit.
 
 Intention goes in, the same intention comes out. No loss at any
 handoff. The bar for every layer.
+
+## Demarcation
+
+A first-class act: knowing where to stop decomposing, and marking
+the boundary explicitly.
+
+Every answer carries its demarcation: "this was good enough *here*."
+Beyond this point, I trust the tool — the API, the sensor, the model.
+I don't decompose the LLM's weights; I don't disassemble the API.
+If I need more, I break it down — but the line is drawn, timestamped,
+and honest.
+
+Demarcation is what gives the descent ladder its floors. Without it,
+every answer becomes a new question and the stack has no bottom.
+With it, operational truth holds *since last time* — until new
+ground truth moves the line.
+
+"I didn't ask after that" isn't laziness. It's architecture.
