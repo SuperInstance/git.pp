@@ -1,0 +1,44 @@
+#!/bin/sh
+# pre-receive -- the remote's only law. Install it by hand in the bare repo's hooks/ directory.
+# Judges every pushed commit against the PARENT's signers and policy (rule 5),
+# and every changed path against one-writer-per-path (rule 3).
+set -u
+Z=0000000000000000000000000000000000000000
+die() { echo "pre-receive: $*" >&2; exit 1; }
+
+signer_of() { # signer_of <commit> <signers-blob>: prints principal or nothing
+    git -c gpg.ssh.allowedSignersFile="$2" log -1 --format=%GS "$1" 2>/dev/null
+}
+
+while read old new ref; do
+    [ "$ref" = refs/heads/main ] || {
+        case $ref in refs/heartbeat/*) ;; *) die "only main and heartbeats move";; esac
+    }
+    [ "$new" != "$Z" ] || die "deleting refs is forbidden"
+    [ "$old" = "$Z" ] && die "main is seeded by the owner, not created by push"
+    range=$([ "$old" = "$Z" ] && echo "$new" || echo "$old..$new")
+    # RULE 2 -- main only moves forward. This is the compare-and-swap every claim relies on.
+    [ "$old" != "$Z" ] && git merge-base --is-ancestor "$old" "$new" || die "non-fast-forward"
+    # verify each commit against its parent's signers (rule 5)
+    for c in $(git rev-list --reverse "$range"); do
+        p=$(git rev-parse "$c^" 2>/dev/null || echo "$Z")
+        [ "$p" = "$Z" ] && die "no root commits via push"
+        git cat-file -e "$p:soul/allowed_signers" 2>/dev/null || die "no signers at $p"
+        s=$(mktemp); git show "$p:soul/allowed_signers" > "$s"
+        who=$(signer_of "$c" "$s"); rm -f "$s"
+        [ -n "$who" ] || die "unsigned or unknown key: $c"
+        owner=$(git show "$p:soul/policy" 2>/dev/null | sed -n 's/^owner: //p')
+        [ -n "$owner" ] || die "no policy at $p"
+        if [ "$who" != "$owner" ]; then
+            # non-owner commits may only touch their own claim/effect paths
+            for f in $(git diff-tree --no-commit-id --name-only -r "$c"); do
+                case $f in
+                    claimed/$who/*|bodies/$who/*|inbox/*) ;;
+                    *) die "$who may not write $f";;
+                esac
+            done
+        fi
+        # no merges, ever: git merges text, not meaning (rule 3)
+        [ $(git rev-list --parents -n 1 "$c" | wc -w) -le 2 ] || die "merge commit"
+    done
+done
