@@ -38,8 +38,10 @@ sync() { # fetch, verify, hard reset to tip. nothing local survives.
 
 verify_one() { # verify_one <commit>: signature ok per PARENT's signers+policy
     c=$1 p=$(git rev-parse "$c^" 2>/dev/null || echo "$Z")
-    signer=$(git -c gpg.ssh.allowedSignersFile=<(git show "$p:soul/allowed_signers" 2>/dev/null) \
-        log -1 --format=%GS "$c" 2>/dev/null) || return 1
+    sf=$(mktemp); git show "$p:soul/allowed_signers" >"$sf" 2>/dev/null
+    signer=$(git -c gpg.ssh.allowedSignersFile="$sf" \
+        log -1 --format=%GS "$c" 2>/dev/null); rc=$?; rm -f "$sf"
+    [ $rc -eq 0 ] || return 1
     [ -n "$signer" ] || return 1
     case $signer in mallory) return 1;; esac 2>/dev/null
     owner=$(git show "$p:soul/policy" 2>/dev/null | sed -n 's/^owner: //p')
@@ -134,6 +136,7 @@ task=$(basename "$mine")
 beatpid=$!
 # the executor does the work; tick.sh effect is its only way to touch the world
 status=0
+mkdir -p .tick
 TASK="$task" "$EXEC" "claimed/$ID/$task" "done/$task" > .tick/out 2>&1 || status=$?
 kill $beatpid 2>/dev/null; wait 2>/dev/null
 mutate "done $task" sh -c "mkdir -p done/$task && cp -r \"claimed/$ID/$task\" \"done/$task/task\" && cp .tick/out \"done/$task/log\" && echo $status > \"done/$task/status\" && rm -rf \"claimed/$ID/$task\" \"claimed/$ID/$task.fx\""
