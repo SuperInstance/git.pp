@@ -1,0 +1,8 @@
+#!/bin/sh
+# post-receive -- after main moves, rebuild refs/pp/* using the projector in the new tip.
+# Install next to pre-receive on the bare repo. It carries no authority: views are checked by
+# recomputation, and pre-receive already refuses pushes to refs/pp/*, so this is the only writer.
+while read -r old new ref; do
+  [ "$ref" = refs/heads/main ] || continue
+  p=$(mktemp); git show "$new:project.sh" >"$p" 2>/dev/null && sh "$p" >/dev/null; rm -f "$p"
+done

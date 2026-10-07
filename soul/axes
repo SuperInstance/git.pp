@@ -1,0 +1,31 @@
+# soul/axes -- the coordinate system. Owner-only, like everything in soul/.
+#
+# A path is a point flattened in one axis order. This file says which segment is which axis,
+# so the same cells can be re-addressed in any other order.
+#
+#   PATTERN [axis=value ...]   a path family. First matching line wins.
+#       literal                  must equal the segment
+#       <axis>                   binds one segment
+#       pre<axis>suf             binds a segment minus literal text around it
+#       <axis...>                binds the rest of the path (last segment only)
+#       axis=value               a constant coordinate for every cell in this family
+#
+#   view NAME AXIS...          a derived tree at refs/pp/NAME, addressed by these axes in this
+#                              order. A cell is in the view if it has the first axis; axes it
+#                              lacks are skipped. Every cell also has `path` and `hash`
+#                              (written ab/cdef..., fanned out the way .git/objects is).
+#                              Naming `seq` makes the view range over every appearance in
+#                              history (seq = position on main + commit) instead of the tip.
+
+inbox/<task>.fx/<effect...>            state=inbox    part=fx
+inbox/<task>                           state=inbox    part=task
+claimed/<body>/<task>.fx/<effect...>   state=claimed  part=fx
+claimed/<body>/<task>                  state=claimed  part=task
+done/<task>/fx/<effect...>             state=done     part=fx
+done/<task>/<part...>                  state=done
+bodies/<body>/<part...>                state=self
+soul/<part...>
+
+view by-task  task state body part effect
+view by-body  body state task part effect
+view by-hash  hash seq path
