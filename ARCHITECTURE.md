@@ -437,7 +437,8 @@ A new student or rubric ships through a gate that reads the log:
 
 ## Layer 7: the agent
 
-**Status: designed here; the harness pieces are in the build order.**
+**Status: commitments as forecasts are built and tested here (`forecast.py`); the charter and
+consolidation are conventions, below.**
 
 An agent here is a model plus three harnesses: a way to hear, a way to remember, and a way to
 make. It needs no code execution. The research supports three load-bearing constraints and adds
@@ -459,7 +460,9 @@ What this means for the repo:
 - **A charter** in the agent's directory, versioned like everything else.
 - **Commitments as forecasts.** Each thing the agent makes registers the question that will
   resolve it, so the hearing channel closes the loop with an outcome and the agent enters the
-  same scoring ledger as the judges.
+  same scoring ledger as the judges. `forecast.py` does this: the question lives at
+  `bodies/<agent>/forecasts/<name>.md`, the agent's probability goes on its own log, and only a
+  `world` judge may log the outcome. `test-forecast.sh` (7 checks) runs it end to end.
 - **The Jev as the agent's fast check.** A 7 ms judge gives a no-execution agent feedback faster
   than any human. It counts as outside correction only to the extent it is calibrated against
   the world and comes from a different lineage than the agent's model.
@@ -500,7 +503,7 @@ where people or other systems are the environment.
 | 7 | Track records and routing | **Built** (`ledger.py`, `gate.choose`), including each labeller's weekly Brier against world outcomes | — |
 | 8 | Ship gate | **Built, unit tests** (`shipgate.py`): a release that nets +5 in a region but breaks 5 items there is blocked | Remaining: canary rollout for rubric and threshold content |
 | 9 | Window compiler v1 | Partly built (`window.py`) | Briefs are byte-identical on a second body and stored with results |
-| 10 | Agent harness v2: charter, consolidation, commitments as forecasts | Designed | An agent's commitments resolve into the scoring ledger |
+| 10 | Agent harness v2: charter, consolidation, commitments as forecasts | **Forecasts built, 7 checks** (`forecast.py`) | Remaining: window compiler reads the charter and a verbatim slice of outside input |
 | 11 | Ensembles and density scores | Deferred | Adopted only where audits show plain confidence ranks errors poorly |
 
 ## Experiments only this system can run cheaply
