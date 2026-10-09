@@ -152,9 +152,10 @@ Answer the question about the content below. Give your own probabilities for -1 
 
 
 def review_name(period, seed, subject, question):
-    """Review tasks carry no key in their name, so a drill looks like any other review."""
-    return "review-%s-%s" % (period, hmac.new(bytes.fromhex(seed), ("%s:%s" % (subject, question)).encode(),
-                                              hashlib.sha256).hexdigest()[:12])
+    """Review tasks carry neither key nor period in their name, so a drill looks exactly like the
+    review of a real escalation (gatekeep.py names those from a hash of the key)."""
+    return "review-" + hmac.new(bytes.fromhex(seed), ("%s:%s:%s" % (period, subject, question)).encode(),
+                                hashlib.sha256).hexdigest()[:12]
 
 
 def review_task(repo, period, name, subject, question, judgment, judge_name):
@@ -163,7 +164,7 @@ def review_task(repo, period, name, subject, question, judgment, judge_name):
     body = content.stdout.decode(errors="replace") if content.returncode == 0 else ""
     shown = body if body and len(body) <= 20000 else "(content not in this repository: blob %s)" % subject
     neg, zero, pos = judgment.p
-    return """# Review %s: check a verdict
+    return """# Review: check a verdict
 to: any
 needs: review
 subject: %s
@@ -182,7 +183,7 @@ question: %s
 ## Done when
 - one line is logged with `jlog.py append`, judge = your judge manifest hash, sel=appeal,
   prop=1, and extra field review=%s
-""" % (name, subject, question, judge_name, neg, zero, pos, q_text, shown, name)
+""" % (subject, question, judge_name, neg, zero, pos, q_text, shown, name)
 
 
 def audit_tasks_in_history(repo, period, remote="origin"):

@@ -316,6 +316,12 @@ expected error with the expert's expected error on that kind of item; escalating
 is also bad in that region buys nothing. The gate therefore routes on the difference between
 track records, which only blind audits that score the humans can supply.
 
+`gatekeep.py` is the operator that applies all of this to one judgment: it decides, logs the
+judgment with `sel`, `prop`, the decision, the item's regions and a hash of the gate
+configuration, and turns an escalation into a review task that shows the student's verdict
+(fault drills look exactly the same). Recording regions on the line means the ledger never has
+to guess later where an old item belonged.
+
 Three mechanisms keep labels flowing into the regions the gate avoids:
 
 - **Shadow judgments:** the student's verdict is logged on every escalated item (`sel=shadow`),
@@ -330,8 +336,7 @@ Three mechanisms keep labels flowing into the regions the gate avoids:
 **Status: built and tested here.** The audit stream and fault drills (`audit.py`), track
 records and the labeller trend (`ledger.py`), and the ship gate with churn, verdict diff,
 polarization monitor and drift decomposition (`shipgate.py`). `test-audit.sh` (28 checks) runs
-them against the real hook; 35 unit tests cover the rest. Not built: the bypass slice and the
-consumer registry.
+them against the real hook; 35 unit tests cover the rest. Not built: the consumer registry.
 
 Independence is the scarce input. This layer mints it cheaply, spends it where information is
 worth most, and records where it came from.
@@ -490,7 +495,7 @@ where people or other systems are the environment.
 | 2 | Projection: axes, projector, post-receive | **Built, 40 checks** | — |
 | 3 | Log v2: schema, writer to per-body refs, hook rule | **Built, 23 checks** (`jlog.py`, `pre-receive`) | Remaining: backfill the live v0 log from `~/judgment-log.tsv` with `jlog.py append` |
 | 4 | Audit stream: commit-reveal selector, blind tasks, fault drills | **Built, 28 end-to-end checks** (`audit.py`) | — |
-| 5 | Shadow judgments and exploration | **Built** (`gate.py` exploration; `ledger.py` reads shadow and appeal lines) | Remaining: wire into the tick's executor so every escalation logs its `sel=shadow` line |
+| 5 | Shadow judgments, exploration, bypass slice | **Built** (`gatekeep.py`): every decision is logged with why, regions and a configuration hash; escalations become review tasks | Remaining: call it from each body's executor |
 | 6 | Region gate | **Built, unit and end-to-end tests** (`gate.py`) | Bound reproduces the audit table (60 clean items: 4.9%; 150: 2.0%; 60 with one error: 7.7%) |
 | 7 | Track records and routing | **Built** (`ledger.py`, `gate.choose`), including each labeller's weekly Brier against world outcomes | — |
 | 8 | Ship gate | **Built, unit tests** (`shipgate.py`): a release that nets +5 in a region but breaks 5 items there is blocked | Remaining: canary rollout for rubric and threshold content |

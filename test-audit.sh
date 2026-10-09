@@ -1,5 +1,6 @@
 #!/bin/bash
-# test-audit.sh -- the commit-reveal audit stream on a throwaway remote with the real hook.
+# test-audit.sh -- the audit loop end to end on a throwaway remote with the real hook: judge,
+# commit-reveal audit selection, blind labels, ledger, gate, gate operator, fault drills, verification.
 set -u
 HERE=$(cd "$(dirname "$0")" && pwd); W=$(mktemp -d)
 export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null   # ignore the host's own git/signing setup
@@ -19,7 +20,7 @@ clone() { git clone -q "$R" "$W/$1" 2>/dev/null || git init -q -b main "$W/$1"
 git init -q --bare -b main "$R"
 clone seed casey; cd "$W/seed"; git remote add origin "$R" 2>/dev/null
 mkdir soul questions judges; for k in casey oracle laptop; do echo "$k $(cut -d' ' -f1,2 "$W/keys/$k.pub")"; done > soul/allowed_signers
-printf 'owner: casey\nlease: 3600\n' > soul/policy; printf 'Is this good?\n' > questions/root.md
+printf 'owner: casey\nlease: 3600\naccept: default 0.10\nexplore: 0\nbypass: 0\n' > soul/policy; printf 'Is this good?\n' > questions/root.md
 printf 'name: student\nkind: student\nrole: judge\n' > judges/student.md
 printf 'name: casey\nkind: human\nrole: labeller\n' > judges/casey.md
 for i in $(seq 1 400); do echo "item $i" > "item-$i"; done   # contents the judge will look at
@@ -100,16 +101,28 @@ same "its positive verdicts were never wrong" "$3" 0
 same "the gate escalates new negative verdicts" "$4" escalate
 same "and acts on positive ones" "$5" act
 
+echo "2b. the gate operator: decide, log why, and escalate into a review"
+cd "$W/oracle"; G="python3 $HERE/gatekeep.py --body oracle --question $Q --judge $JU"
+echo "item new good" > new-good; echo "item new bad" > new-bad
+pos=$($G --subject new-good --p 0.05 0.05 0.90); neg=$($G --subject new-bad --p 0.90 0.05 0.05)
+yes  "acts on the verdict kind audits confirmed" sh -c "echo '$pos' | grep -q '\"action\": \"act\"'"
+yes  "escalates the kind they did not"   sh -c "echo '$neg' | grep -q '\"action\": \"escalate\"'"
+review=$(echo "$neg" | python3 -c "import json,sys; print(json.load(sys.stdin)['review'])")
+yes  "the escalation became a review task" rgit cat-file -e "main:inbox/$review"
+yes  "which shows the student's verdict" sh -c "git -C '$R' show 'main:inbox/$review' | grep -q -- '-1: 0.90'"
+last=$(cd "$W/casey" && $J cat oracle | tail -2 | cut -f9,11- | tr '\t\n' '  ')
+yes  "both decisions are on oracle's log with why ($last)" sh -c "echo '$last' | grep -q 'stream.*gate=act.*shadow.*gate=escalate'"
+
 echo "3. fault drills: a verdict known to be wrong, shown to a reviewer"
 cd "$W/oracle"; $A commit --period p5 --auditor oracle --rate 0 >/dev/null
 same "five drills from the judge's audited mistakes" "$($A drill --period p5 --auditor oracle --judge "$JU" --n 5 | cut -d' ' -f1)" 5
-git fetch -q origin; drills=$(rgit ls-tree --name-only main inbox/ | grep review-p5- | wc -l | tr -d ' ')
-same "they look like any review task" "$drills" 5
-d1=$(rgit ls-tree --name-only main inbox/ | grep review-p5- | head -1)
+git fetch -q origin; drills=$(rgit ls-tree --name-only main inbox/ | grep review- | wc -l | tr -d ' ')
+same "they look like any review task" "$drills" 6                       # 5 drills + 1 escalation
+d1=$(rgit ls-tree --name-only main inbox/ | grep review- | grep -v "$review" | head -1)
 yes  "a drill shows the wrong verdict" sh -c "git -C '$R' show 'main:$d1' | grep -q -- '-1: 0.90'"
-not  "and never says it is a drill" sh -c "git -C '$R' show 'main:$d1' | grep -qi drill"
+not  "and never says it is a drill" sh -c "git -C '$R' show 'main:$d1' | grep -qi 'drill\|p5'"
 cd "$W/casey"; git fetch -q origin
-for t in $(rgit ls-tree --name-only main inbox/ | grep review-p5-); do rgit show "main:$t"; echo "name: ${t#inbox/}"; echo "@@"; done > reviews
+for t in $(rgit ls-tree --name-only main inbox/ | grep review- | grep -v "$review"); do rgit show "main:$t"; echo "name: ${t#inbox/}"; echo "@@"; done > reviews
 python3 - "$HERE" "$Q" "$JC" reviews > answers <<'PY'
 import sys; sys.path.insert(0, sys.argv[1]); import jlog
 for k, task in enumerate(t for t in open(sys.argv[4]).read().split("@@") if t.strip()):

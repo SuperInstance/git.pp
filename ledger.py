@@ -27,6 +27,13 @@ def default_regions(subject, question):
     return ["all", "q:" + question[:12]]
 
 
+def regions_on(j):
+    """Regions recorded on the line at judgment time (extra field regions=a,b,c), if any. Recording
+    them then means the ledger never has to reconstruct where an old item belonged."""
+    r = j.extra.get("regions")
+    return r.split(",") if r else None
+
+
 def manifests(repo, remote="origin"):
     """{blob hash of manifest: {field: value}} for every file under judges/ on main."""
     out = {}
@@ -90,7 +97,7 @@ class Ledger:
             res = self.resolution.get((s, q))
             if res is None or judge in res[2]:
                 continue                     # unresolved, or resolved by this judge itself
-            yield judge, q, self.regions_of(s, q), j, res[0], res[1]
+            yield judge, q, regions_on(j) or self.regions_of(s, q), j, res[0], res[1]
 
     def table(self):
         """{(judge, question, region): dict(n, brier, error, weight)}."""
