@@ -70,6 +70,15 @@ def parse(line):
     return Judgment(f[0], f[1], f[2], f[3], p, f[7], float(f[8]), extra)
 
 
+def utc(ts):
+    """A judgment timestamp as naive UTC 'YYYY-MM-DDTHH:MM:SS' (v0 lines carry no zone: read as UTC)."""
+    from datetime import datetime, timezone
+    d = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+    if d.tzinfo:
+        d = d.astimezone(timezone.utc).replace(tzinfo=None)
+    return d.strftime("%Y-%m-%dT%H:%M:%S")
+
+
 def format_line(subject, question, judge, p, sel="stream", prop=1.0, ts=None, **extra):
     """A v2 line, with the probabilities rounded to four decimals and renormalised to sum to 1."""
     r = [round(x, 4) for x in p]
@@ -146,26 +155,39 @@ def append(repo, body, lines, remote="origin", retries=5):
     raise RuntimeError("could not append after %d attempts" % retries)
 
 
-def iter_log(repo, bodies=None, remote="origin", fetch=True):
-    """Yield (body, line) for every line in the logs, each body's batches oldest first."""
+def log_tips(repo, remote="origin", fetch=True):
+    """{body: commit} for every judgment log, after fetching them all."""
     if fetch:
         git(repo, "fetch", "-q", remote, "+refs/log/judgments/*:refs/log/judgments/*")
-    refs = git(repo, "for-each-ref", "--format=%(refname)", "refs/log/judgments/").split()
-    for ref in refs:
-        body = ref.rsplit("/", 1)[1]
+    out = git(repo, "for-each-ref", "--format=%(refname) %(objectname)", "refs/log/judgments/")
+    return {r.rsplit("/", 1)[1]: c for r, c in (l.split() for l in out.splitlines())}
+
+
+def iter_log(repo, bodies=None, remote="origin", fetch=True, with_time=False, tips=None):
+    """Yield (body, line) for every line in the logs, each body's batches oldest first.
+    With with_time, yield (body, commit_time, line): when the batch reached the log.
+    With tips ({body: commit}), read each log only up to that commit: the logs as they stood then."""
+    tips = tips if tips is not None else log_tips(repo, remote, fetch)
+    for body in sorted(tips):
+        ref = tips[body]
         if bodies and body not in bodies:
             continue
-        raw = git(repo, "log", "--reverse", "--no-renames", "--root", "--raw", "--no-abbrev", "--format=C %H", ref)
-        blobs = [l.split()[3] for l in raw.splitlines() if l.startswith(":")]
+        raw = git(repo, "log", "--reverse", "--no-renames", "--root", "--raw", "--no-abbrev", "--format=C %ct", ref)
+        blobs, times, t = [], [], 0
+        for l in raw.splitlines():
+            if l.startswith("C "):
+                t = int(l.split()[1])
+            elif l.startswith(":"):
+                blobs.append(l.split()[3]); times.append(t)
         if not blobs:
             continue
         out = git(repo, "cat-file", "--batch", data=("\n".join(blobs) + "\n").encode())
         pos = 0
-        for _ in blobs:
+        for t in times:
             nl = out.index("\n", pos)
             size = int(out[pos:nl].split()[2])
             for line in out[nl + 1:nl + 1 + size].splitlines():
-                yield body, line
+                yield (body, t, line) if with_time else (body, line)
             pos = nl + 2 + size
 
 

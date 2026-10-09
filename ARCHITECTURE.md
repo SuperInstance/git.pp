@@ -335,9 +335,17 @@ An auditor body (the Oracle) selects items for audit with a secret seed committe
    verdict, so suppressed and abstained items are sampled at the same rate as acted ones.
 3. Drop each selected item into `inbox/` as a blind task: the labeller sees the content and the
    question, not the verdicts.
-4. At the end of the period, commit `bodies/<auditor>/audit/<period>.reveal` with the seed.
-   Anyone can check it against the commitment and recompute the full selection from the log,
-   which proves nothing selected was skipped and nothing was cherry-picked.
+4. At the end of the period, commit `bodies/<auditor>/audit/<period>.reveal` with the seed and
+   the tip of every judgment log at that moment. Anyone can check the seed against the
+   commitment and recompute the full selection from the logs as they stood at the reveal, which
+   proves nothing selected was skipped and nothing was cherry-picked. Lines appended later,
+   backdated or not, cannot change the result.
+
+`audit.py` implements all four steps plus `verify`. `test-audit.sh` (17 checks, against the real
+hook) confirms that about the configured share of items is selected, that negative (suppressed)
+verdicts are sampled at the same rate as positive ones, that tasks never show a verdict, and that
+verification catches an auditor who skipped items, one who added a hand-picked item, and a seed
+swapped after the fact.
 
 Judges cannot predict which of their verdicts will be audited, because the seed is secret until
 the period closes. Strata may oversample hard or novel regions; each label carries its stratum
@@ -468,7 +476,7 @@ where people or other systems are the environment.
 | 1 | Substrate: tick, pre-receive | **Built, 57 checks** | — |
 | 2 | Projection: axes, projector, post-receive | **Built, 40 checks** | — |
 | 3 | Log v2: schema, writer to per-body refs, hook rule | **Built, 23 checks** (`jlog.py`, `pre-receive`) | Remaining: backfill the live v0 log from `~/judgment-log.tsv` with `jlog.py append` |
-| 4 | Audit stream: commit-reveal selector, blind tasks, fault drills | Next | A revealed seed reproduces the exact selection from the log, including suppressed items |
+| 4 | Audit stream: commit-reveal selector, blind tasks, fault drills | **Selector built, 17 checks** (`audit.py`) | Remaining: fault drills, which need resolved audits from the track-record piece |
 | 5 | Shadow judgments and exploration | Next | Every escalation produces a `sel=shadow` line; exploration logs `prop` |
 | 6 | Region gate | Next | Unaudited regions never act; the bound matches the audit tables; thresholds move with outcomes |
 | 7 | Track records and routing | Next | Every judge and reviewer has a Brier score per region; routing picks the lower expected loss |

@@ -7,8 +7,8 @@ export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null   # ignore the ho
 mkdir -p "$W/keys"; pass=0; fail=0
 ok()   { pass=$((pass+1)); echo "  ok    $1"; }
 bad()  { fail=$((fail+1)); echo "  FAIL  $1"; }
-yes()  { n=$1; shift; if "$@" >/dev/null 2>&1; then ok "$n"; else bad "$n"; fi; }
-not()  { n=$1; shift; if "$@" >/dev/null 2>&1; then bad "$n"; else ok "$n"; fi; }
+yes()  { _t=$1; shift; if "$@" >/dev/null 2>&1; then ok "$_t"; else bad "$_t"; fi; }
+not()  { _t=$1; shift; if "$@" >/dev/null 2>&1; then bad "$_t"; else ok "$_t"; fi; }
 same() { if [ "$2" = "$3" ]; then ok "$1"; else bad "$1"; printf '        want: %s\n        got:  %s\n' "$3" "$2"; fi; }
 R="$W/remote.git"; rgit() { git -C "$R" "$@"; }
 J="python3 $HERE/jlog.py"

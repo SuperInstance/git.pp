@@ -17,5 +17,7 @@ jobs:
         run: SH=${{ matrix.sh }} AWK=${{ matrix.awk }} ./test-pp.sh
       - name: judgment logs (jlog.py + pre-receive)
         run: AWK=${{ matrix.awk }} ./test-log.sh
+      - name: audit stream (audit.py + pre-receive)
+        run: ./test-audit.sh
       - name: unit tests
         run: python3 -m unittest discover -s tests -v
