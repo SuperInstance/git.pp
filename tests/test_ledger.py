@@ -67,5 +67,20 @@ class LedgerTests(unittest.TestCase):
         self.assertAlmostEqual(self.led.appeal_value(ST), 0.5)        # h changed, i confirmed
 
 
+class Trend(unittest.TestCase):
+    def test_a_labeller_getting_worse_shows_up(self):
+        lines = []
+        for week, (day, wrong_every) in enumerate([("2026-09-01", 10), ("2026-09-08", 10), ("2026-09-15", 3)]):
+            for i in range(30):
+                s = "%02x%038x" % (week, i)
+                lines.append(("w", jlog.format_line(s, Q, W, (0, 0, 1), ts=day + "T06:00:00Z")))
+                p = (1, 0, 0) if i % wrong_every == 0 else (0, 0, 1)
+                lines.append(("c", jlog.format_line(s, Q, L1, p, "audit", 1.0, ts=day + "T07:00:00Z", blind="1")))
+        trend = ledger.Ledger(lines, ROLES).labeller_trend(L1)
+        self.assertEqual([n for _, n, _ in trend], [30, 30, 30])
+        self.assertAlmostEqual(trend[0][2], 2 * 3 / 30)            # 3 wrong of 30, Brier 2 each
+        self.assertGreater(trend[2][2], 2 * trend[0][2])
+
+
 if __name__ == "__main__":
     unittest.main()

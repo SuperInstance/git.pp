@@ -54,6 +54,7 @@ class Ledger:
         labels = defaultdict(list)           # (subject, question) -> [(p, prop, judge)]
         world = {}
         appeals = defaultdict(list)          # (subject, question) -> [Judgment] from appeal judges
+        self_labels = []                     # every blind label, for scoring labellers against the world
         for body, line in lines:
             if jlog.validate(line):
                 continue
@@ -64,6 +65,7 @@ class Ledger:
                 world[key] = j
             elif role == "labeller" and j.sel == "audit" and j.extra.get("blind") == "1":
                 labels[key].append((j.p, j.prop, j.judge))
+                self_labels.append(j)
             elif j.sel == "appeal":
                 appeals[key].append(j)
             elif j.sel in ("stream", "shadow", "explore"):
@@ -80,7 +82,7 @@ class Ledger:
                 continue                     # labellers split evenly: unresolved
             prop = min(pr for _, pr, _ in ls)
             self.resolution[key] = (argmax(mean), 1.0 / prop, {jd for _, _, jd in ls})
-        self.latest, self.appeals = latest, appeals
+        self.latest, self.appeals, self.labels, self.world = latest, appeals, self_labels, world
 
     def scored(self):
         """Yield (judge, question, regions, judgment, label, weight) for every resolved item."""
@@ -130,6 +132,24 @@ class Ledger:
         """{(region, verdict): threshold or None} ready for gate.decide."""
         from gate import calibrate
         return {k: calibrate(v, alpha) for k, v in self.conformal_scores(judge, question).items()}
+
+    def labeller_trend(self, labeller):
+        """[(iso week, n, mean Brier)] of a labeller's blind labels against world outcomes, oldest
+        first. A rising Brier is the deskilling alarm: the person who must catch the judge's
+        failures is getting worse at it."""
+        from datetime import datetime
+        weeks = defaultdict(lambda: [0, 0.0])
+        for j in self.labels:
+            w = self.world.get((j.subject, j.question))
+            if j.judge != labeller or w is None:
+                continue
+            truth = argmax(w.p)
+            y = [1.0 if lab == truth else 0.0 for lab in LABELS]
+            yr, wk, _ = datetime.fromisoformat(jlog.utc(j.ts)).isocalendar()
+            b = weeks["%d-W%02d" % (yr, wk)]
+            b[0] += 1
+            b[1] += sum((p - t) ** 2 for p, t in zip(j.p, y))
+        return [(k, n, tot / n) for k, (n, tot) in sorted(weeks.items())]
 
     def appeal_value(self, judge):
         """Share of appealed items where the higher judge disagreed with this judge's shadow

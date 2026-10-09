@@ -10,13 +10,21 @@
       a verdict, so suppressed and abstained items are sampled like any other.
   audit.py reveal --period P
       Publish bodies/<auditor>/audit/P.reveal with the seed, once the window has closed.
+  audit.py drill --period P --judge J [--n K] [--tau T]
+      Fault drills: pick up to K items where judge J was confidently wrong on a resolved audit,
+      and drop each as a review task that SHOWS the judge's verdict, named like any other review.
+      The drill list stays secret (in .git/audit/P.drills) until the reveal.
+  audit.py drills --period P --auditor A
+      After the reveal: for each reviewer, the share of drills where they did not follow the
+      wrong verdict they were shown. A falling share is the deskilling alarm.
   audit.py verify --period P --auditor A
       Anyone: check the seed against its commitment, recompute the selection from the logs, and
       compare it with the audit tasks the auditor actually created. Reports skipped and
       cherry-picked items.
 
 The auditor is AGENT_ID (or --auditor). Labellers answer a task by logging, with jlog.py,
-a judgment with sel=audit, prop=<the task's rate>, seed=<period> and blind=1.
+a judgment with sel=audit, prop=<the task's rate>, seed=<period> and blind=1. Reviewers answer
+review tasks (real escalations and drills look the same) with sel=appeal and review=<task name>.
 Standard library only.
 """
 import hashlib, hmac, os, secrets, subprocess, sys, time
@@ -143,6 +151,40 @@ Answer the question about the content below. Give your own probabilities for -1 
 """ % (period, period, subject, question, rate, q_text, shown, rate, period)
 
 
+def review_name(period, seed, subject, question):
+    """Review tasks carry no key in their name, so a drill looks like any other review."""
+    return "review-%s-%s" % (period, hmac.new(bytes.fromhex(seed), ("%s:%s" % (subject, question)).encode(),
+                                              hashlib.sha256).hexdigest()[:12])
+
+
+def review_task(repo, period, name, subject, question, judgment, judge_name):
+    q_text = git(repo, "cat-file", "-p", question, check=False).strip() or "(question %s)" % question
+    content = subprocess.run(["git", "-C", repo, "cat-file", "-p", subject], capture_output=True)
+    body = content.stdout.decode(errors="replace") if content.returncode == 0 else ""
+    shown = body if body and len(body) <= 20000 else "(content not in this repository: blob %s)" % subject
+    neg, zero, pos = judgment.p
+    return """# Review %s: check a verdict
+to: any
+needs: review
+subject: %s
+question: %s
+
+%s answered this item with -1: %.2f, 0: %.2f, +1: %.2f. Decide for yourself whether that is right.
+
+## Question
+
+%s
+
+## Content
+
+%s
+
+## Done when
+- one line is logged with `jlog.py append`, judge = your judge manifest hash, sel=appeal,
+  prop=1, and extra field review=%s
+""" % (name, subject, question, judge_name, neg, zero, pos, q_text, shown, name)
+
+
 def audit_tasks_in_history(repo, period, remote="origin"):
     """Every audit task for this period ever added to main, wherever it is now."""
     names = git(repo, "log", "%s/main" % remote, "--diff-filter=A", "--name-only", "--format=").split()
@@ -165,7 +207,7 @@ def main(argv):
             opts[a[2:]] = next(it)
         else:
             args.append(a)
-    if not args or args[0] not in ("commit", "select", "reveal", "verify") or "period" not in opts:
+    if not args or args[0] not in ("commit", "select", "reveal", "verify", "drill", "drills") or "period" not in opts:
         print(__doc__.strip(), file=sys.stderr)
         return 2
     cmd, period, remote, repo = args[0], opts["period"], opts["remote"], os.getcwd()
@@ -214,11 +256,75 @@ def main(argv):
         print("%d selected, %d new tasks" % (len(chosen), len(files)))
         return 0
 
+    if cmd == "drill":
+        import ledger
+        seed = open(seed_file).read().strip()
+        judge, n_max = opts["judge"], int(opts.get("n", "5"))
+        mans = ledger.manifests(repo, remote)
+        roles = {h: m.get("role", "judge") for h, m in mans.items()}
+        led = ledger.Ledger(jlog.iter_log(repo, remote=remote), roles, tau=float(opts.get("tau", "0.8")))
+        wrong = [(s, q, j) for jd, q, _, j, label, _ in led.scored() for s in [j.subject]
+                 if jd == judge and max(j.p) >= led.tau and ledger.argmax(j.p) != label]
+        wrong.sort(key=lambda x: key_hash(seed, x[0], x[1]))
+        drills_file = seed_file[:-len(".seed")] + ".drills"
+        known = set(open(drills_file).read().split("\n")) if os.path.exists(drills_file) else set()
+        files, chosen = {}, []
+        for s, q, j in wrong[:n_max]:
+            name = review_name(period, seed, s, q)
+            chosen.append("%s %s %s %s" % (s, q, judge, name))
+            files["inbox/" + name] = review_task(repo, period, name, s, q, j, mans.get(judge, {}).get("name", judge[:12]))
+        with open(drills_file, "w") as f:
+            f.write("\n".join(sorted(known | set(chosen))) + "\n")
+        if files:
+            publish(repo, auditor, files, "review tasks %s: %d" % (period, len(files)), remote)
+        print("%d drills from %d confidently wrong verdicts" % (len(files), len(wrong)))
+        return 0
+
+    if cmd == "drills":
+        import ledger
+        reveal = main_file(repo, base + ".reveal")
+        if reveal is None:
+            print("period %s is not revealed yet" % period, file=sys.stderr)
+            return 1
+        drills = {}
+        for l in reveal.splitlines():
+            if l.startswith("drill: "):
+                s, q, judge, name = l.split()[1:5]
+                drills[name] = (s, q, judge)
+        shown = {}
+        caught = {}
+        lines = list(jlog.iter_log(repo, remote=remote))
+        for _, line in lines:
+            if jlog.validate(line):
+                continue
+            j = jlog.parse(line)
+            if j.sel == "stream" and any(j.subject == s and j.question == q and j.judge == jd for s, q, jd in drills.values()):
+                shown[(j.subject, j.question, j.judge)] = ledger.argmax(j.p)
+        for _, line in lines:
+            if jlog.validate(line):
+                continue
+            j = jlog.parse(line)
+            name = j.extra.get("review")
+            if j.sel == "appeal" and name in drills:
+                s, q, jd = drills[name]
+                c = caught.setdefault(j.judge, [0, 0])
+                c[0] += 1
+                c[1] += int(ledger.argmax(j.p) != shown.get((s, q, jd)))
+        mans = ledger.manifests(repo, remote)
+        for reviewer, (n, ok) in sorted(caught.items()):
+            print("%-20s caught %d of %d drills (%.0f%%)" % (mans.get(reviewer, {}).get("name", reviewer[:12]), ok, n, 100.0 * ok / n))
+        if not caught:
+            print("no drill answered yet (%d drills)" % len(drills))
+        return 0
+
     if cmd == "reveal":
         seed = open(seed_file).read().strip()
         # record the logs as they stand now: verification reads them only up to here
         tips = jlog.log_tips(repo, remote)
         text = "period: %s\nseed: %s\n" % (period, seed) + "".join("log: %s %s\n" % kv for kv in sorted(tips.items()))
+        drills_file = seed_file[:-len(".seed")] + ".drills"
+        if os.path.exists(drills_file):
+            text += "".join("drill: %s\n" % l for l in open(drills_file).read().split("\n") if l.strip())
         print(publish(repo, auditor, {base + ".reveal": text}, "audit reveal " + period, remote))
         return 0
 

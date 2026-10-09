@@ -327,8 +327,11 @@ Three mechanisms keep labels flowing into the regions the gate avoids:
 
 ## Layer 6: independence
 
-**Status: the audit stream (`audit.py`) and track records (`ledger.py`) are built and tested
-here; the polarization monitor and ship gate are next.**
+**Status: built and tested here.** The audit stream and fault drills (`audit.py`), track
+records and the labeller trend (`ledger.py`), and the ship gate with churn, verdict diff,
+polarization monitor and drift decomposition (`shipgate.py`). `test-audit.sh` (28 checks) runs
+them against the real hook; 35 unit tests cover the rest. Not built: the bypass slice and the
+consumer registry.
 
 Independence is the scarce input. This layer mints it cheaply, spends it where information is
 worth most, and records where it came from.
@@ -372,9 +375,10 @@ their score. One unit of attention buys:
 - **calibration training** (under an hour of Brier feedback improved forecasters by 6–11%);
 - **an unbiased label** for the judges.
 
-Audit sets also carry **fault drills** (`sel=drill`): items where the student is known to be
-wrong, shown with its verdict. They test directly whether reviewers still catch a faulty
-instrument, the skill that decays first. In a simulator, 75% of experienced pilots followed a
+Audit sets also carry **fault drills**: items where the student is known to be wrong, shown
+with its verdict in a review task that looks like any other. They test directly whether reviewers still catch a faulty
+instrument, the skill that decays first. The drill list stays secret until the period's reveal;
+`audit.py drills` then reports each reviewer's catch rate. In a simulator, 75% of experienced pilots followed a
 faulty altimeter; experienced endoscopists' unassisted detection rate fell from 28.4% to 22.4%
 within about three months of AI assistance.
 
@@ -485,11 +489,11 @@ where people or other systems are the environment.
 | 1 | Substrate: tick, pre-receive | **Built, 57 checks** | — |
 | 2 | Projection: axes, projector, post-receive | **Built, 40 checks** | — |
 | 3 | Log v2: schema, writer to per-body refs, hook rule | **Built, 23 checks** (`jlog.py`, `pre-receive`) | Remaining: backfill the live v0 log from `~/judgment-log.tsv` with `jlog.py append` |
-| 4 | Audit stream: commit-reveal selector, blind tasks, fault drills | **Selector built, 17 checks** (`audit.py`) | Remaining: fault drills, which need resolved audits from the track-record piece |
+| 4 | Audit stream: commit-reveal selector, blind tasks, fault drills | **Built, 28 end-to-end checks** (`audit.py`) | — |
 | 5 | Shadow judgments and exploration | **Built** (`gate.py` exploration; `ledger.py` reads shadow and appeal lines) | Remaining: wire into the tick's executor so every escalation logs its `sel=shadow` line |
 | 6 | Region gate | **Built, unit and end-to-end tests** (`gate.py`) | Bound reproduces the audit table (60 clean items: 4.9%; 150: 2.0%; 60 with one error: 7.7%) |
-| 7 | Track records and routing | **Built** (`ledger.py`, `gate.choose`) | Remaining: reviewer Brier trends over time as the deskilling alarm |
-| 8 | Ship gate | Next | A synthetic update that breaks one cluster is blocked despite a positive net change |
+| 7 | Track records and routing | **Built** (`ledger.py`, `gate.choose`), including each labeller's weekly Brier against world outcomes | — |
+| 8 | Ship gate | **Built, unit tests** (`shipgate.py`): a release that nets +5 in a region but breaks 5 items there is blocked | Remaining: canary rollout for rubric and threshold content |
 | 9 | Window compiler v1 | Partly built (`window.py`) | Briefs are byte-identical on a second body and stored with results |
 | 10 | Agent harness v2: charter, consolidation, commitments as forecasts | Designed | An agent's commitments resolve into the scoring ledger |
 | 11 | Ensembles and density scores | Deferred | Adopted only where audits show plain confidence ranks errors poorly |

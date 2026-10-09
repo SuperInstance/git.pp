@@ -100,7 +100,28 @@ same "its positive verdicts were never wrong" "$3" 0
 same "the gate escalates new negative verdicts" "$4" escalate
 same "and acts on positive ones" "$5" act
 
-echo "3. what verification catches"
+echo "3. fault drills: a verdict known to be wrong, shown to a reviewer"
+cd "$W/oracle"; $A commit --period p5 --auditor oracle --rate 0 >/dev/null
+same "five drills from the judge's audited mistakes" "$($A drill --period p5 --auditor oracle --judge "$JU" --n 5 | cut -d' ' -f1)" 5
+git fetch -q origin; drills=$(rgit ls-tree --name-only main inbox/ | grep review-p5- | wc -l | tr -d ' ')
+same "they look like any review task" "$drills" 5
+d1=$(rgit ls-tree --name-only main inbox/ | grep review-p5- | head -1)
+yes  "a drill shows the wrong verdict" sh -c "git -C '$R' show 'main:$d1' | grep -q -- '-1: 0.90'"
+not  "and never says it is a drill" sh -c "git -C '$R' show 'main:$d1' | grep -qi drill"
+cd "$W/casey"; git fetch -q origin
+for t in $(rgit ls-tree --name-only main inbox/ | grep review-p5-); do rgit show "main:$t"; echo "name: ${t#inbox/}"; echo "@@"; done > reviews
+python3 - "$HERE" "$Q" "$JC" reviews > answers <<'PY'
+import sys; sys.path.insert(0, sys.argv[1]); import jlog
+for k, task in enumerate(t for t in open(sys.argv[4]).read().split("@@") if t.strip()):
+    f = dict(l.split(": ", 1) for l in task.splitlines() if l.startswith(("subject: ", "name: ")))
+    p = (0, 0, 1) if k < 3 else (1, 0, 0)          # catches the first three, follows the instrument on two
+    print(jlog.format_line(f["subject"], sys.argv[2], sys.argv[3], p, "appeal", 1, review=f["name"]))
+PY
+$J append --body casey answers >/dev/null
+cd "$W/oracle"; $A reveal --period p5 --auditor oracle >/dev/null
+cd "$W/casey"; same "the drill report scores the reviewer" "$($A drills --period p5 --auditor oracle)" "casey                caught 3 of 5 drills (60%)"
+
+echo "4. what verification catches"
 cd "$W/laptop"                                       # backdated judgments after the reveal change nothing
 python3 - "$HERE" "$Q" "$JU" > late <<'PY'
 import sys; sys.path.insert(0, sys.argv[1]); import jlog, hashlib
