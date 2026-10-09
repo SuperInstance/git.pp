@@ -48,7 +48,8 @@ git init -q --bare -b main ~/fleet.git
 ## 3. Genesis
 
 The owner writes the constitution: who may sign, the owner, the lease, the coordinate system,
-the first question, and the owner's own judge manifest. Everything in `soul/` stays owner-only.
+the first question, and the judge manifests: the owner as labeller, the student model, and the
+laptop's agent. On a v2 log line a judge is named by its manifest's blob hash. Everything in `soul/` stays owner-only.
 
 ```sh
 # [casey] write and sign the genesis commit
@@ -63,6 +64,8 @@ echo "casey $(cut -d' ' -f1,2 ~/.ssh/fleet.pub)" > soul/allowed_signers
 printf 'owner: casey\nlease: 3600\naccept: default 0.02\nexplore: 0.02\nbypass: 0.005\n' > soul/policy
 printf 'Is this good?\n' > questions/root.md
 printf 'name: casey\nkind: human\nrole: labeller\n' > judges/casey.md
+printf 'name: intuition-student-v1\nkind: model\nrole: judge\n' > judges/student.md
+printf 'name: laptop-agent\nkind: agent\nrole: judge\n' > judges/laptop-agent.md
 git add -A && git commit -qS -m genesis && git push -q origin main
 ```
 
@@ -174,7 +177,50 @@ python3 audit.py reveal --period w41 --auditor oracle
 cd ~/fleet && python3 audit.py verify --period w41 --auditor oracle
 ```
 
-## 9. Schedules
+## 9. The gate
+
+The gate operator decides, for each judgment, whether to act, explore or escalate. A judge with
+no audited track record in a region never acts there: its verdicts go to people as review tasks
+in `inbox/`, which is how the record starts. Call it once per tick with the tick's whole batch.
+
+```sh
+# [oracle] gate a batch of judgments
+cd ~/fleet && git fetch -q && Q=$(git rev-parse origin/main:questions/root.md)
+ST=$(git rev-parse origin/main:judges/student.md)
+printf '%s %s %s 0.02 0.03 0.95\n' "$(printf 'deploy' | git hash-object --stdin)" "$Q" "$ST" > ~/batch
+AGENT_ID=oracle python3 gatekeep.py --batch ~/batch
+```
+
+## 10. Forecasts
+
+An agent's work is scored by the world, not by itself. When it makes something it publishes a
+forecast of how it will turn out; later a `world` judge (a test run, or a person recording what
+happened) resolves it, and the agent enters the same ledger as every judge. The owner first
+names who may speak for the world.
+
+```sh
+# [casey] admit a world judge
+cd ~/fleet && git pull -q
+printf 'name: casey-world\nkind: human\nrole: world\n' > judges/casey-world.md
+git add judges && git commit -qS -m "world judge" && git push -q origin main
+```
+
+```sh
+# [laptop] forecast that the greeting will land
+cd ~/fleet && git pull -q
+AGENT_ID=laptop python3 forecast.py make --judge "$(git rev-parse HEAD:judges/laptop-agent.md)" --made done/001-hello/answer \
+  --criterion "the owner reads it as a greeting" --p 0.9 --slug hello
+```
+
+```sh
+# [casey] resolve the forecast
+cd ~/fleet && git pull -q && python3 forecast.py open
+AGENT_ID=casey python3 forecast.py resolve --judge "$(git rev-parse HEAD:judges/casey-world.md)" \
+  --forecast bodies/laptop/forecasts/hello.md --outcome yes
+python3 forecast.py open | wc -l
+```
+
+## 11. Schedules
 
 Run the tick from cron (or a systemd timer) on every body. Intervals follow the body's nature:
 fast where it is cheap, slow where it is expensive. The lease in `soul/policy` must be longer
@@ -203,5 +249,7 @@ select has run.
   an unknown key. Nothing will happen on that body until a human looks; that is intended.
 - **A body is reaped while working.** Its heartbeat is older than the lease: a sleeping
   laptop, or a clock that ran behind (WSL after sleep). Lengthen the lease or fix the clock.
+- **`push refused: ... line 1: judge`.** A v2 judgment line names its judge by the blob hash of
+  a manifest under `judges/` on main. Names are accepted only on v0 lines from `jlog.py sync`.
 - **`refs/pp` views are behind.** A push changed `soul/axes` to something not one-to-one; the
   pusher was told why. `project.sh verify` reports how many commits behind they are.

@@ -32,6 +32,9 @@ for step in "$W"/step-*; do
                         echo "$out" | grep -q '^Window: [0-9a-f]\{40\}' && ok "  the done commit names its window" || bad "  the done commit names its window" ;;
     "move the local"*)  [ "$(echo "$out" | tail -1)" = "up to date" ] && ok "  the second sync appends nothing" || bad "  the second sync appends nothing" ;;
     "verify the auditor"*) echo "$out" | grep -q '^ok: 1 selected' && ok "  the audit selected the one judged item and verified" || bad "  audit verify ($out)" ;;
+    "gate a batch"*)    echo "$out" | grep -q '"action": "escalate"' && echo "$out" | grep -q '"review": "review-' && ok "  an unaudited judge escalates to a review task" || bad "  gate ($out)" ;;
+    "resolve the forecast"*) [ "$(echo "$out" | head -1)" = "bodies/laptop/forecasts/hello.md" ] && ok "  the forecast was open" || bad "  forecast open ($out)"
+                        [ "$(echo "$out" | tail -1 | tr -d ' ')" = 0 ] && ok "  and is resolved" || bad "  forecast resolved ($out)" ;;
   esac
 done
 
