@@ -77,8 +77,10 @@ A body is a keypair, a manifest and a tick. The agent's identity is the repo, no
 
 ## Layer 1: the substrate
 
-**Status: built and tested here.** `tick.sh` (85 lines of code), `pre-receive` (48), `test.sh`
-(57 checks, passing under dash and bash).
+**Status: built and tested here.** `tick.sh`, `pre-receive`, `test.sh` (61 checks, passing
+under dash and bash). `agent-exec.sh` is a reference executor: it compiles the task's window,
+hands it to the agent command, and keeps it beside the result; the tick then records the
+window's blob hash as a `Window:` trailer on the done commit.
 
 The tick is a pure function: `tick(tree@main, capabilities) -> signed commits`. A body holds
 nothing between ticks; after a kill anywhere, recovery is fetch and hard reset. The five rules,
@@ -507,7 +509,7 @@ where people or other systems are the environment.
 | 6 | Region gate | **Built, unit and end-to-end tests** (`gate.py`) | Bound reproduces the audit table (60 clean items: 4.9%; 150: 2.0%; 60 with one error: 7.7%) |
 | 7 | Track records and routing | **Built** (`ledger.py`, `gate.choose`), including each labeller's weekly Brier against world outcomes | — |
 | 8 | Ship gate | **Built, unit tests** (`shipgate.py`): a release that nets +5 in a region but breaks 5 items there is blocked; a gate configuration that acts on more wrong verdicts is blocked; a labeller that errs where the judge errs is flagged | — |
-| 9 | Window compiler v1 | **Built, 13 checks** (`window.py`): charter, task, judgments, open questions, precedents with failures first, pins | Remaining: the executor stores each window with its result |
+| 9 | Window compiler v1 | **Built, 13 checks** (`window.py`): charter, task, judgments, open questions, precedents with failures first, pins; `agent-exec.sh` stores each window with its result and the tick records its hash as a `Window:` trailer | — |
 | 10 | Agent harness v2: charter, consolidation, commitments as forecasts | **Forecasts built, 7 checks** (`forecast.py`); the window compiler puts the charter first | Remaining: a verbatim slice of recent outside input in each window |
 | 11 | Ensembles and density scores | Deferred | Adopted only where audits show plain confidence ranks errors poorly |
 

@@ -9,6 +9,7 @@ ok()  { pass=$((pass+1)); echo "  ok    $1"; }
 bad() { fail=$((fail+1)); echo "  FAIL  $1"; }
 yes() { n=$1; shift; if "$@" >/dev/null 2>&1; then ok "$n"; else bad "$n"; fi; }
 not() { n=$1; shift; if "$@" >/dev/null 2>&1; then bad "$n"; else ok "$n"; fi; }
+same() { if [ "$2" = "$3" ]; then ok "$1"; else bad "$1"; printf '        want: %s\n        got:  %s\n' "$3" "$2"; fi; }
 R="$W/remote.git"
 rgit()  { git -C "$R" "$@"; }
 has()   { rgit cat-file -e "main:$1"; }
@@ -56,6 +57,15 @@ yes "manifest published"            has bodies/oracle/manifest
 n=$(count); tick oracle CAPS=cpu EXEC="$W/bin/echo"
 yes "idle tick leaves no commit"    [ "$(count)" = "$n" ]
 yes "heartbeat ref exists"          rgit rev-parse -q --verify refs/heartbeat/oracle
+
+echo "1b. the window an agent acted on is kept with its result"
+task 001-window "# Summarise\nRead done/001-hello/answer and say what it means."
+cp "$HERE/window.py" "$HERE/jlog.py" "$HERE/ledger.py" "$HERE/gate.py" "$HERE/agent-exec.sh" "$W/bin/"
+tick oracle CAPS=cpu EXEC="$W/bin/agent-exec.sh" AGENT_CMD='grep -c "hello from oracle" > answer || true'
+yes  "the window is stored with the result" has done/001-window/window.md
+yes  "the agent read it"                 [ "$(rgit show main:done/001-window/answer)" -ge 0 ]
+same "the done commit names it by hash"  "$(rgit log -1 --format=%B main | sed -n 's/^Window: //p')" "$(rgit rev-parse main:done/001-window/window.md)"
+yes  "it compiled the precedent it named" sh -c "git -C '$R' show main:done/001-window/window.md | grep -q '001-hello'"
 
 echo "2. capability matching"
 task 002-gpu "$(printf 'needs: gpu\nrender')"; tick oracle CAPS=cpu EXEC="$W/bin/echo"
