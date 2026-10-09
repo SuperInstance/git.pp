@@ -157,5 +157,15 @@ same "still no view moved"           "$(rgit for-each-ref refs/pp/)" "$before"
 fresh casey; echo "inbox/<x...>/y/<z" >> soul/axes; msg=$(push "bad grammar" 2>&1)
 yes  "bad grammar is refused too"    sh -c "echo '$msg' | grep -q 'bad pattern'"
 
+echo "9. verify follows main only through signed commits"
+fresh casey; sed -i '/^inbox\/<x/d; /^view tangle/d' soul/axes; push "repair axes" >/dev/null 2>&1
+yes  "a fresh signed push verifies"   sh -c "cd '$W/kimi' && $SH ./project.sh verify origin"
+mv "$R/hooks/pre-receive" "$R/hooks/off"
+fresh kimi; echo x > PROTOCOL.md; git add -A; git -c commit.gpgsign=false commit -qm unsigned; git push -q origin HEAD:main
+mv "$R/hooks/off" "$R/hooks/pre-receive"
+same "the remote built views from the unsigned commit" "$(src by-task)" "$(rgit rev-parse main)"
+not  "a body that verified main refuses them" sh -c "cd '$W/kimi' && $SH ./project.sh verify origin"
+not  "so does a fresh clone, trusting only genesis" sh -c "git clone -q '$R' '$W/fresh' && cd '$W/fresh' && $SH ./project.sh verify origin"
+
 echo; echo "$pass passed, $fail failed  (sh=$SH, awk=$AWK, $(rgit rev-list --count main) commits on main)"
 if [ -n "${KEEP:-}" ]; then echo "kept: $W"; else rm -rf "$W"; fi; [ "$fail" = 0 ]

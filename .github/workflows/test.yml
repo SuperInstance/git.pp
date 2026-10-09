@@ -15,7 +15,19 @@ jobs:
         run: SH=${{ matrix.sh }} ./test.sh
       - name: projection (project.sh + post-receive)
         run: SH=${{ matrix.sh }} AWK=${{ matrix.awk }} ./test-pp.sh
+      - name: projection extends exactly like a rebuild
+        run: AWK=${{ matrix.awk }} ./test-pp-inc.sh 60
       - name: judgment logs (jlog.py + pre-receive)
         run: AWK=${{ matrix.awk }} ./test-log.sh
+      - name: audit stream (audit.py + pre-receive)
+        run: ./test-audit.sh
+      - name: forecasts (forecast.py + pre-receive)
+        run: ./test-forecast.sh
+      - name: window compiler (window.py)
+        run: ./test-window.sh
+      - name: memory pages (consolidate.py)
+        run: ./test-consolidate.sh
+      - name: the operations guide, executed (OPERATIONS.md)
+        run: ./test-ops.sh
       - name: unit tests
         run: python3 -m unittest discover -s tests -v

@@ -45,8 +45,9 @@ act() {
   for _ in 1 2 3 4 5; do
     sync || return 1
     "$@" && git add -A && git commit -qS -m "$msg" --trailer "Body: $ID" --trailer "Task: ${TASK:--}" \
-      --trailer "Model: ${MODEL:--}" --trailer "Soul: $(git rev-parse HEAD:soul)" || return 1
-    git push -q origin HEAD:main 2>/dev/null && return 0
+      --trailer "Model: ${MODEL:--}" --trailer "Soul: $(git rev-parse HEAD:soul)" \
+      ${WINDOW:+--trailer "Window: $WINDOW"} || return 1
+    git push -q origin HEAD:main 2>/dev/null && git update-ref refs/verified/main HEAD && return 0   # our own signed commit
   done
   return 1
 }
@@ -116,6 +117,7 @@ tick() {
   ( exec 9>&- >/dev/null 2>&1; while sleep "$BEAT" && kill -0 $$ 2>/dev/null; do beat; done ) & hb=$!
   "$EXEC" "claimed/$ID/$TASK" "$out" >"$out/log" 2>&1; echo $? >"$out/status"
   kill "$hb" 2>/dev/null
+  [ ! -f "$out/window.md" ] || WINDOW=$(git hash-object "$out/window.md")   # what the agent knew, by hash
   act "done $TASK" finish "$out"; rm -rf "$out"     # failure is a result too: it lands in done/ with its status
 }
 
