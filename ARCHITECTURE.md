@@ -536,7 +536,7 @@ where people or other systems are the environment.
 | 7 | Track records and routing | **Built** (`ledger.py`, `gate.choose`), including each labeller's weekly Brier against world outcomes | — |
 | 8 | Ship gate | **Built, unit tests** (`shipgate.py`): a release that nets +5 in a region but breaks 5 items there is blocked; a gate configuration that acts on more wrong verdicts is blocked; a labeller that errs where the judge errs is flagged | — |
 | 9 | Window compiler v1 | **Built, 16 checks** (`window.py`): charter, task, judgments, a verbatim slice of outside voices, open questions, precedents with failures first, pins; `agent-exec.sh` stores each window with its result and the tick records its hash as a `Window:` trailer | — |
-| 10 | Agent harness v2: charter, consolidation, commitments as forecasts | **Forecasts built, 7 checks** (`forecast.py`); the window compiler puts the charter first and shows recent outside input verbatim ; memory pages compiled by `consolidate.py` (15 checks) and read first in every window | — |
+| 10 | Agent harness v2: charter, consolidation, commitments as forecasts | **Built**: forecasts (`forecast.py`, 7 checks); the window compiler puts the charter first and shows recent outside input verbatim; memory pages compiled by `consolidate.py` (15 checks) and read first in every window | — |
 | 11 | Ensembles and density scores | Deferred | Adopted only where audits show plain confidence ranks errors poorly |
 
 ## Experiments only this system can run cheaply
