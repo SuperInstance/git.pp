@@ -166,16 +166,18 @@ def log_tips(repo, remote="origin", fetch=True):
     return {r.rsplit("/", 1)[1]: c for r, c in (l.split() for l in out.splitlines())}
 
 
-def iter_log(repo, bodies=None, remote="origin", fetch=True, with_time=False, tips=None):
+def iter_log(repo, bodies=None, remote="origin", fetch=True, with_time=False, tips=None, since=None):
     """Yield (body, line) for every line in the logs, each body's batches oldest first.
     With with_time, yield (body, commit_time, line): when the batch reached the log.
-    With tips ({body: commit}), read each log only up to that commit: the logs as they stood then."""
+    With tips ({body: commit}), read each log only up to that commit: the logs as they stood then.
+    With since ({body: commit}), skip what each log held at that commit: only what was added."""
     tips = tips if tips is not None else log_tips(repo, remote, fetch)
     for body in sorted(tips):
         ref = tips[body]
         if bodies and body not in bodies:
             continue
-        raw = git(repo, "log", "--reverse", "--no-renames", "--root", "--raw", "--no-abbrev", "--format=C %ct", ref)
+        rng = "%s..%s" % (since[body], ref) if since and body in since else ref
+        raw = git(repo, "log", "--reverse", "--no-renames", "--root", "--raw", "--no-abbrev", "--format=C %ct", rng)
         blobs, times, t = [], [], 0
         for l in raw.splitlines():
             if l.startswith("C "):

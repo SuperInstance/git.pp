@@ -124,14 +124,16 @@ same "one new review per escalation"     "$(rgit ls-tree --name-only main inbox/
 
 echo "3. fault drills: a verdict known to be wrong, shown to a reviewer"
 cd "$W/oracle"; $A commit --period p5 --auditor oracle --rate 0 >/dev/null
+pre=$(rgit ls-tree --name-only main inbox/ | grep review- | sort)
 same "five drills from the judge's audited mistakes" "$($A drill --period p5 --auditor oracle --judge "$JU" --n 5 | cut -d' ' -f1)" 5
-git fetch -q origin; drills=$(rgit ls-tree --name-only main inbox/ | grep review- | wc -l | tr -d ' ')
-same "they look like any review task" "$drills" 8                       # 5 drills + 3 escalations
-d1=$(rgit ls-tree --name-only main inbox/ | grep review- | grep -v "$review" | head -1)
+git fetch -q origin; post=$(rgit ls-tree --name-only main inbox/ | grep review- | sort)
+drillset=$(comm -13 <(echo "$pre") <(echo "$post"))
+same "they look like any review task" "$(echo "$post" | wc -l | tr -d ' ')" 8          # 5 drills + 3 escalations
+d1=$(echo "$drillset" | head -1)
 yes  "a drill shows the wrong verdict" sh -c "git -C '$R' show 'main:$d1' | grep -q -- '-1: 0.90'"
 not  "and never says it is a drill" sh -c "git -C '$R' show 'main:$d1' | grep -qi 'drill\|p5'"
 cd "$W/casey"; git fetch -q origin
-for t in $(rgit ls-tree --name-only main inbox/ | grep review- | grep -v "$review"); do rgit show "main:$t"; echo "name: ${t#inbox/}"; echo "@@"; done > reviews
+for t in $drillset; do rgit show "main:$t"; echo "name: ${t#inbox/}"; echo "@@"; done > reviews
 python3 - "$HERE" "$Q" "$JC" reviews > answers <<'PY'
 import sys; sys.path.insert(0, sys.argv[1]); import jlog
 for k, task in enumerate(t for t in open(sys.argv[4]).read().split("@@") if t.strip()):

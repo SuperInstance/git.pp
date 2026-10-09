@@ -336,6 +336,13 @@ configuration, and turns an escalation into a review task that shows the student
 (fault drills look exactly the same). Recording regions on the line means the ledger never has
 to guess later where an old item belonged.
 
+Cost: the operator rebuilds the ledger from the logs on each run, so it should be called in
+batches (`--batch`), once per tick. On a synthetic log of a million lines with 20,000 audited
+items, building the ledger took 6.6 s and computing the gate's records and thresholds 0.3 s.
+Caching the built ledger with pickle did not help (267 MB, 7.3 s to load); beyond a few million
+lines the next step is the SQLite cache measured for the log itself (5–8 ms per 200-subject
+lookup at 1–10M lines).
+
 Three mechanisms keep labels flowing into the regions the gate avoids:
 
 - **Shadow judgments:** the student's verdict is logged on every escalated item (`sel=shadow`),

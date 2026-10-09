@@ -57,32 +57,39 @@ class Ledger:
     def __init__(self, lines, roles, regions_of=default_regions, tau=0.8):
         """lines: iterable of (body, line); roles: {judge hash: role}."""
         self.roles, self.regions_of, self.tau = roles, regions_of, tau
-        latest = {}                          # (judge, subject, question) -> Judgment, last stream/shadow/explore
-        labels = defaultdict(list)           # (subject, question) -> [(p, prop, judge)]
-        world = {}
-        appeals = defaultdict(list)          # (subject, question) -> [Judgment] from appeal judges
-        self_labels = []                     # every blind label, for scoring labellers against the world
+        self.latest = {}                     # (judge, subject, question) -> newest stream/shadow/explore Judgment
+        self.label_map = defaultdict(list)   # (subject, question) -> [(p, prop, judge)]
+        self.world = {}
+        self.appeals = defaultdict(list)     # (subject, question) -> [Judgment] from appeal judges
+        self.labels = []                     # every blind label, for scoring labellers against the world
+        self.ingest(lines)
+
+    def ingest(self, lines):
+        """Add more lines (the logs only grow) and recompute what depends on them."""
         for body, line in lines:
-            if jlog.validate(line):
+            try:                                 # lines on log refs passed the hook's validation already;
+                j = jlog.parse(line)             # anything malformed is skipped, never trusted
+            except (ValueError, IndexError):
                 continue
-            j = jlog.parse(line)
+            if len(j.subject) not in (40, 64) or len(j.p) != 3:
+                continue
             key = (j.subject, j.question)
-            role = roles.get(j.judge, "judge")
+            role = self.roles.get(j.judge, "judge")
             if role == "world":
-                world[key] = j
+                self.world[key] = j
             elif role == "labeller" and j.sel == "audit" and j.extra.get("blind") == "1":
-                labels[key].append((j.p, j.prop, j.judge))
-                self_labels.append(j)
+                self.label_map[key].append((j.p, j.prop, j.judge))
+                self.labels.append(j)
             elif j.sel == "appeal":
-                appeals[key].append(j)
+                self.appeals[key].append(j)
             elif j.sel in ("stream", "shadow", "explore"):
                 k = (j.judge, j.subject, j.question)   # newest by time, whichever body's log it came from
-                if k not in latest or jlog.utc(j.ts) >= jlog.utc(latest[k].ts):
-                    latest[k] = j
+                if k not in self.latest or jlog.utc(j.ts) >= jlog.utc(self.latest[k].ts):
+                    self.latest[k] = j
         self.resolution = {}                 # key -> (label, weight, resolvers)
-        for key, j in world.items():
+        for key, j in self.world.items():
             self.resolution[key] = (argmax(j.p), 1.0, {j.judge})
-        for key, ls in labels.items():
+        for key, ls in self.label_map.items():
             if key in self.resolution:
                 continue
             mean = [sum(p[i] for p, _, _ in ls) / len(ls) for i in range(3)]
@@ -91,15 +98,23 @@ class Ledger:
                 continue                     # labellers split evenly: unresolved
             prop = min(pr for _, pr, _ in ls)
             self.resolution[key] = (argmax(mean), 1.0 / prop, {jd for _, _, jd in ls})
-        self.latest, self.appeals, self.labels, self.world = latest, appeals, self_labels, world
+        self.by_key = defaultdict(dict)      # (subject, question) -> {judge: Judgment}, resolved items only
+        for (judge, s, q), j in self.latest.items():
+            if (s, q) in self.resolution:
+                self.by_key[(s, q)][judge] = j
+        return self
 
-    def scored(self):
-        """Yield (judge, question, regions, judgment, label, weight) for every resolved item."""
-        for (judge, s, q), j in sorted(self.latest.items()):
-            res = self.resolution.get((s, q))
-            if res is None or judge in res[2]:
-                continue                     # unresolved, or resolved by this judge itself
-            yield judge, q, regions_on(j) or self.regions_of(s, q), j, res[0], res[1]
+    def scored(self, judge=None, question=None):
+        """Yield (judge, question, regions, judgment, label, weight) for every resolved item,
+        optionally for one judge and question. Walks the resolved items, not every judgment."""
+        for (s, q) in sorted(self.by_key):
+            if question is not None and q != question:
+                continue
+            label, weight, resolvers = self.resolution[(s, q)]
+            for jd, j in sorted(self.by_key[(s, q)].items()):
+                if judge is not None and jd != judge or jd in resolvers:
+                    continue                     # resolved by this judge itself
+                yield jd, q, regions_on(j) or self.regions_of(s, q), j, label, weight
 
     def table(self):
         """{(judge, question, region): dict(n, brier, error, weight)}."""
@@ -118,8 +133,8 @@ class Ledger:
         `confident(p)` decides which verdicts count; by default the top probability >= tau."""
         confident = confident or (lambda p: max(p) >= self.tau)
         rec = defaultdict(lambda: [0, 0])
-        for jd, q, regions, j, label, _ in self.scored():
-            if jd != judge or q != question or not confident(j.p):
+        for jd, q, regions, j, label, _ in self.scored(judge, question):
+            if not confident(j.p):
                 continue
             v = argmax(j.p)
             for r in regions:
@@ -131,8 +146,8 @@ class Ledger:
         """{(region, verdict): [1 - p(label)]}: Mondrian calibration data for the gate, split by
         the judge's top verdict so each kind of verdict earns its own threshold."""
         out = defaultdict(list)
-        for jd, q, regions, j, label, _ in self.scored():
-            if jd == judge and q == question:
+        for jd, q, regions, j, label, _ in self.scored(judge, question):
+            if True:
                 for r in regions:
                     out[(r, argmax(j.p))].append(1 - j.p[LABELS.index(label)])
         return dict(out)

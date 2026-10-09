@@ -67,6 +67,15 @@ class LedgerTests(unittest.TestCase):
         self.assertAlmostEqual(self.led.appeal_value(ST), 0.5)        # h changed, i confirmed
 
 
+class Incremental(unittest.TestCase):
+    def test_ingesting_in_two_parts_equals_one_pass(self):
+        whole = ledger.Ledger(LINES, ROLES)
+        parts = ledger.Ledger(LINES[:7], ROLES).ingest(LINES[7:])
+        self.assertEqual(whole.table(), parts.table())
+        self.assertEqual(whole.resolution, parts.resolution)
+        self.assertEqual(whole.gate_record(ST, Q), parts.gate_record(ST, Q))
+
+
 class Latest(unittest.TestCase):
     def test_newest_by_time_wins_across_bodies(self):
         s = "c" * 40
