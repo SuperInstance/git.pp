@@ -113,11 +113,20 @@ yes  "which shows the student's verdict" sh -c "git -C '$R' show 'main:inbox/$re
 last=$(cd "$W/casey" && $J cat oracle | tail -2 | cut -f9,11- | tr '\t\n' '  ')
 yes  "both decisions are on oracle's log with why ($last)" sh -c "echo '$last' | grep -q 'stream.*gate=act.*shadow.*gate=escalate'"
 
+G2="python3 $HERE/gatekeep.py --body oracle"
+printf '%s %s %s 0.05 0.05 0.90\n%s %s %s 0.90 0.05 0.05\n%s %s %s 0.05 0.05 0.90 src:new\n' \
+  "$(echo b1 | git hash-object --stdin)" "$Q" "$JU" "$(echo b2 | git hash-object --stdin)" "$Q" "$JU" "$(echo b3 | git hash-object --stdin)" "$Q" "$JU" > batch-in
+before=$(cd "$W/casey" && $J cat oracle | wc -l)
+acts=$($G2 --batch batch-in | python3 -c "import json,sys; print(' '.join(json.loads(l)['action'] for l in sys.stdin))")
+same "a batch decides each item on its own" "$acts" "act escalate escalate"
+same "and logs them in one go"           "$(( $(cd "$W/casey" && $J cat oracle | wc -l) - before ))" 3
+same "one new review per escalation"     "$(rgit ls-tree --name-only main inbox/ | grep -c review-)" 3
+
 echo "3. fault drills: a verdict known to be wrong, shown to a reviewer"
 cd "$W/oracle"; $A commit --period p5 --auditor oracle --rate 0 >/dev/null
 same "five drills from the judge's audited mistakes" "$($A drill --period p5 --auditor oracle --judge "$JU" --n 5 | cut -d' ' -f1)" 5
 git fetch -q origin; drills=$(rgit ls-tree --name-only main inbox/ | grep review- | wc -l | tr -d ' ')
-same "they look like any review task" "$drills" 6                       # 5 drills + 1 escalation
+same "they look like any review task" "$drills" 8                       # 5 drills + 3 escalations
 d1=$(rgit ls-tree --name-only main inbox/ | grep review- | grep -v "$review" | head -1)
 yes  "a drill shows the wrong verdict" sh -c "git -C '$R' show 'main:$d1' | grep -q -- '-1: 0.90'"
 not  "and never says it is a drill" sh -c "git -C '$R' show 'main:$d1' | grep -qi 'drill\|p5'"

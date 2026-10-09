@@ -76,7 +76,9 @@ class Ledger:
             elif j.sel == "appeal":
                 appeals[key].append(j)
             elif j.sel in ("stream", "shadow", "explore"):
-                latest[(j.judge, j.subject, j.question)] = j
+                k = (j.judge, j.subject, j.question)   # newest by time, whichever body's log it came from
+                if k not in latest or jlog.utc(j.ts) >= jlog.utc(latest[k].ts):
+                    latest[k] = j
         self.resolution = {}                 # key -> (label, weight, resolvers)
         for key, j in world.items():
             self.resolution[key] = (argmax(j.p), 1.0, {j.judge})

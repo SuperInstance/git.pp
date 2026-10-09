@@ -4,6 +4,10 @@ the system able to learn about the regions it avoids.
 
   gatekeep.py --subject FILE|--subject-hash H --question Q --judge J --p NEG ZERO POS
               [--regions r1,r2] [--class CLASS] [--reversible]
+  gatekeep.py --batch FILE [--class CLASS] [--reversible]
+      FILE has one judgment per line: subject question judge neg zero pos [regions]. The
+      ledger is read once and every decision goes to the log in one batch: the way a tick
+      should call it.
 
 For one (subject, question) judged by J with probabilities p:
   1. A small, logged share of items bypasses the judge entirely (`bypass:` in soul/policy):
@@ -79,7 +83,8 @@ def main(argv):
             opts["p"] = tuple(float(next(it)) for _ in range(3))
         elif a.startswith("--"):
             opts[a[2:]] = next(it)
-    if "p" not in opts or "question" not in opts or "judge" not in opts or not ({"subject", "subject-hash"} & set(opts)):
+    single = "p" in opts and "question" in opts and "judge" in opts and ({"subject", "subject-hash"} & set(opts))
+    if not single and "batch" not in opts:
         print(__doc__.strip(), file=sys.stderr)
         return 2
     repo, remote = os.getcwd(), opts["remote"]
@@ -87,24 +92,38 @@ def main(argv):
     if not body:
         print("need --body or AGENT_ID", file=sys.stderr)
         return 2
-    subject = opts.get("subject-hash") or jlog.git(repo, "hash-object", "-w", opts["subject"]).strip()
-    question, judge = opts["question"], opts["judge"]
-    regions = ["all", "q:" + question[:12]] + [r for r in opts.get("regions", "").split(",") if r]
+    if single:
+        subject = opts.get("subject-hash") or jlog.git(repo, "hash-object", "-w", opts["subject"]).strip()
+        items = [(subject, opts["question"], opts["judge"], opts["p"], [r for r in opts.get("regions", "").split(",") if r])]
+    else:
+        items = []
+        for l in open(opts["batch"]).read().splitlines():
+            f = l.split()
+            if len(f) >= 6:
+                items.append((f[0], f[1], f[2], tuple(float(x) for x in f[3:6]), f[6].split(",") if len(f) > 6 else []))
     jlog.git(repo, "fetch", "-q", remote, "+refs/heads/main:refs/remotes/%s/main" % remote)
     pol = read_policy(audit.main_file(repo, "soul/policy", remote))
     mans = ledger.manifests(repo, remote)
-    roles = ledger.roles_of(mans)
-    led = ledger.Ledger(jlog.iter_log(repo, remote=remote), roles, tau=float(pol["tau"]))
-    d, line = plan(opts["p"], regions, led, pol, judge, question, subject, opts["class"], "reversible" in flags)
-    jlog.append(repo, body, [line], remote)
-    out = {"action": d.action, "verdict": d.verdict, "reason": d.reason, "region": d.region,
-           "bound": None if d.bound is None else round(d.bound, 4), "cfg": pol["cfg"]}
-    if d.action == "escalate":
-        name, task = escalation_review(repo, subject, question, line, mans.get(judge, {}).get("name", judge[:12]))
-        if audit.main_file(repo, "inbox/" + name, remote) is None:
-            audit.publish(repo, body, {"inbox/" + name: task}, "escalate " + name, remote)
-        out["review"] = name
-    print(json.dumps(out, sort_keys=True))
+    led = ledger.Ledger(jlog.iter_log(repo, remote=remote), ledger.roles_of(mans), tau=float(pol["tau"]))
+    lines, reviews, outs = [], {}, []
+    for subject, question, judge, p, extra_regions in items:
+        regions = ["all", "q:" + question[:12]] + extra_regions
+        d, line = plan(p, regions, led, pol, judge, question, subject, opts["class"], "reversible" in flags)
+        lines.append(line)
+        out = {"subject": subject, "action": d.action, "verdict": d.verdict, "reason": d.reason, "region": d.region,
+               "bound": None if d.bound is None else round(d.bound, 4), "cfg": pol["cfg"]}
+        if d.action == "escalate":
+            name, task = escalation_review(repo, subject, question, line, mans.get(judge, {}).get("name", judge[:12]))
+            if audit.main_file(repo, "inbox/" + name, remote) is None:
+                reviews["inbox/" + name] = task
+            out["review"] = name
+        outs.append(out)
+    if lines:
+        jlog.append(repo, body, lines, remote)
+    if reviews:
+        audit.publish(repo, body, reviews, "escalate %d items" % len(reviews), remote)
+    for out in outs:
+        print(json.dumps(out, sort_keys=True))
     return 0
 
 

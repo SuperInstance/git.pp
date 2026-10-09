@@ -67,6 +67,15 @@ class LedgerTests(unittest.TestCase):
         self.assertAlmostEqual(self.led.appeal_value(ST), 0.5)        # h changed, i confirmed
 
 
+class Latest(unittest.TestCase):
+    def test_newest_by_time_wins_across_bodies(self):
+        s = "c" * 40
+        lines = [("zz", jlog.format_line(s, Q, ST, (0.9, 0.05, 0.05), ts="2026-10-09T08:00:00Z")),   # newer, read first
+                 ("aa", jlog.format_line(s, Q, ST, (0.05, 0.05, 0.9), ts="2026-10-09T07:00:00Z"))]
+        led = ledger.Ledger(lines, ROLES)
+        self.assertEqual(led.latest[(ST, s, Q)].p, (0.9, 0.05, 0.05))
+
+
 class Trend(unittest.TestCase):
     def test_a_labeller_getting_worse_shows_up(self):
         lines = []
