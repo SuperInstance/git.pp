@@ -48,12 +48,11 @@ bodies. All checks passed per the draft report.
 
 ## Verification caveats
 
-- `tick.sh` was transcribed from a chat file-viewer; byte-level
-  whitespace/escaping should be checked against the claude.ai chat
-  attachments before installing. Two spots flagged: `verify_one` uses
-  `<(...)` process substitution (bash-ism vs "POSIX sh" header); the reap
-  loop's `claimed/*/` glob vs owner parsing.
-- Nothing has run on our machines. The scratch remote was throwaway.
+- The earlier copies of `tick.sh`, `pre-receive`, `test.sh` and `test-pp.sh` here were
+  transcribed from a chat file viewer and did not match the tested draft (their suite hung,
+  then failed 27 of 57 checks with a short heartbeat). They have been replaced with the tested
+  originals: `test.sh` passes 57 checks and `test-pp.sh` 40, under dash and bash.
+- Nothing has run on our machines yet. The scratch remote was throwaway.
 
 ## Chat
 

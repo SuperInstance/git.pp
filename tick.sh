@@ -1,142 +1,130 @@
 #!/bin/sh
-# tick.sh -- one tick of a git-native agent body. POSIX sh.
-# Env: AGENT_ID (required), CAPS (space-separated, e.g. "cpu gpu"),
-#      EXEC (executor: reads task file, writes result dir, echoes status),
-#      BEAT (seconds between heartbeat beats while working, default 300),
-#      REAP (1 to enable reaping dead claims this tick), TICK (path to tick.sh)
-# Rule 1: the tick is a pure function of (tree@main, AGENT_ID, CAPS).
-# Rule 2: the push is the only act -- mutate() is the sole writer.
-# Rule 3: one writer per path -- every change is whole-file moves/adds.
-# Rule 5: authority is a signature, checked against the PARENT's signers.
+# tick.sh -- one tick of one body:  tick(tree@main, capabilities) -> signed, pushed commits
+#
+#   tick.sh                        run one tick (cron, timer, or a post-receive wake)
+#   tick.sh effect KEY -- CMD...   called by the executor for anything that touches the world
+#
+# env  AGENT_ID  this body's principal in soul/allowed_signers, and its directory name
+#      CAPS      what this body can do, e.g. "cpu net gpu"; matched against a task's "needs:" line
+#      EXEC      the body's cognition: EXEC <task-file> <out-dir>. Whatever it leaves in out-dir
+#                becomes done/<task>/ (names task, fx, log, status are reserved). Unset = no work.
+#      REAP=1    also requeue claims whose body has not heartbeaten within soul/policy "lease:"
+#      BEAT      seconds between heartbeats while EXEC runs (default 300)
+#
+# The clone is this body's alone and holds nothing: every sync does a hard reset and clean -x.
+# It must be able to sign:  git config gpg.format ssh; git config user.signingkey <path-to-key>
 set -u
-ID=${AGENT_ID:?need AGENT_ID}
-CAPS=${CAPS:-cpu}
-EXEC=${EXEC:-}
-BEAT=${BEAT:-300}
-TICK=${TICK:-$0}
-Z=0000000000000000000000000000000000000000
+ID=${AGENT_ID:?} CAPS=${CAPS:-} BEAT=${BEAT:-300} TASK=${TASK:-}
+cd "${REPO:-$(dirname "$0")}" && G=$(git rev-parse --absolute-git-dir) || exit 1
+export GIT_AUTHOR_NAME="$ID" GIT_AUTHOR_EMAIL="$ID@agent" GIT_COMMITTER_NAME="$ID" GIT_COMMITTER_EMAIL="$ID@agent"
 
-log() { printf 'tick[%s]: %s\n' "$ID" "$*" >&2; }
+die() { echo "tick[$ID]: $*" >&2; exit 1; }
 
-# --- pure part: read-only view of the world ---------------------------------
-sync() { # fetch, verify, hard reset to tip. nothing local survives.
-    git fetch -q origin
-    V=$(git rev-parse refs/verified/main 2>/dev/null || echo "$Z")
-    N=$(git rev-parse origin/main)
-    if [ "$V" = "$Z" ]; then
-        git verify-commit "$N" >/dev/null 2>&1 || die "untrusted genesis"
-    else
-        for c in $(git rev-list --reverse "$V..$N" 2>/dev/null); do
-            verify_one "$c" || die "untrusted commit $c"
-        done
-    fi
-    git checkout -qfB main origin/main
-    git clean -qfdx
-    git update-ref refs/verified/main "$N"
-    printf '%s\n' "$N"
+# RULE 5 -- authority is a signature. A commit is trusted only if a key listed in its PARENT's
+# soul/allowed_signers signed it, so nobody can introduce themselves.
+trusted() { git show "$1^:soul/allowed_signers" >"$G/tick.signers" 2>/dev/null &&
+            git -c gpg.ssh.allowedSignersFile="$G/tick.signers" verify-commit "$1" 2>/dev/null; }
+
+# RULE 1 -- the tick is a pure function of the tip. Fetch, verify everything since the last
+# verified tip, then become exactly that tree. refs/verified/main is local; the first run pins it.
+sync() {
+  git fetch -q origin '+refs/heads/main:refs/remotes/origin/main' '+refs/heartbeat/*:refs/heartbeat/*' || return 1
+  new=$(git rev-parse origin/main); old=$(git rev-parse -q --verify refs/verified/main || echo "$new")
+  git merge-base --is-ancestor "$old" "$new" || die "main was rewritten; re-pin refs/verified/main by hand"
+  for c in $(git rev-list "$old..$new"); do trusted "$c" || die "untrusted commit $c on main"; done
+  git update-ref refs/verified/main "$new"
+  git checkout -qfB main "$new" && git clean -qfdx
 }
 
-verify_one() { # verify_one <commit>: signature ok per PARENT's signers+policy
-    c=$1 p=$(git rev-parse "$c^" 2>/dev/null || echo "$Z")
-    sf=$(mktemp); git show "$p:soul/allowed_signers" >"$sf" 2>/dev/null
-    signer=$(git -c gpg.ssh.allowedSignersFile="$sf" \
-        log -1 --format=%GS "$c" 2>/dev/null); rc=$?; rm -f "$sf"
-    [ $rc -eq 0 ] || return 1
-    [ -n "$signer" ] || return 1
-    case $signer in mallory) return 1;; esac 2>/dev/null
-    owner=$(git show "$p:soul/policy" 2>/dev/null | sed -n 's/^owner: //p')
-    [ "$signer" = "$owner" ] && return 0
-    case $(git diff-tree --no-commit-id --name-only -r "$c") in
-        soul/*|PROTOCOL.md) return 1;; # only the owner touches the constitution
-    esac
-    return 0
+# RULE 2 -- the push is the only act. Every state change in the system is this function:
+# start from the fresh tip, apply one mutation, sign, push. A rejected push means we lost a race,
+# so we do not merge or rebase: we throw the commit away and re-decide from the new tip.
+# A mutation returning non-zero means "no longer applicable", and nothing happens.
+act() {
+  msg=$1; shift
+  for _ in 1 2 3 4 5; do
+    sync || return 1
+    "$@" && git add -A && git commit -qS -m "$msg" --trailer "Body: $ID" --trailer "Task: ${TASK:--}" \
+      --trailer "Model: ${MODEL:--}" --trailer "Soul: $(git rev-parse HEAD:soul)" || return 1
+    git push -q origin HEAD:main 2>/dev/null && return 0
+  done
+  return 1
 }
 
-die() { log "FATAL: $*"; exit 1; }
+# RULE 3 -- one writer per path. These are all the mutations there are. Each only moves or adds
+# whole files inside paths this body owns, so two commits can race but never conflict.
+publish() { mkdir -p "bodies/$ID" && echo "caps: $CAPS" >"bodies/$ID/manifest"; }
+claim()   { [ -f "inbox/$1" ] && [ ! -e "done/$1" ] && mkdir -p "claimed/$ID" &&
+            git mv "inbox/$1" "claimed/$ID/$1" &&
+            { [ ! -d "inbox/$1.fx" ] || git mv "inbox/$1.fx" "claimed/$ID/$1.fx"; }; }
+finish()  { [ -f "claimed/$ID/$TASK" ] && mkdir -p "done/$TASK" && cp -R "$1/." "done/$TASK/" &&
+            git mv "claimed/$ID/$TASK" "done/$TASK/task" &&
+            { [ ! -d "$FX" ] || git mv "$FX" "done/$TASK/fx"; }; }
+requeue() { [ -d "claimed/$1" ] && mkdir -p inbox && git mv "claimed/$1"/* inbox/; }
+intend()  { [ -f "claimed/$ID/$TASK" ] && mkdir -p "$FX" && echo "$2" >"$FX/$1.intent"; }
+record()  { [ -f "$FX/$1.intent" ] && cp "$2" "$FX/$1.result"; }
 
-mutate() { # mutate <msg> -- fn: the single writer. apply one fn, sign, push.
-    msg=$1; shift
-    sync >/dev/null || die "sync failed"
-    "$@" || die "mutation failed"
-    git add -A
-    git commit -qS -m "$msg" -m "Body: $ID" -m "Model: ${MODEL:-unknown}" \
-        -m "Soul: $(git rev-parse HEAD^{tree})"
-    git push -q origin HEAD:main || { log "push rejected -- lost the race"; return 75; }
+# Liveness is a ref that gets overwritten, not history: a signed empty commit, dated now.
+beat() { git push -qf origin "$(git commit-tree -S -m beat "$(git mktree </dev/null)"):refs/heartbeat/$ID" 2>/dev/null; }
+
+# RULE 4 -- intent before effect. The intent must land on main before CMD runs, and landing
+# requires still holding the claim, so a body that was reaped while asleep cannot act on the world.
+# A recorded result is replayed, never re-run. An intent with no result means a crash in between:
+# the outcome is unknown, so we refuse (exit 75) and leave it to a human or a follow-up task.
+# CMD gets INTENT=<commit hash> to pass downstream as an idempotency key.
+effect() {
+  key=$1; shift 2; : "${TASK:?effect must be called from inside a task}"
+  sync || return 75
+  [ ! -f "$FX/$key.result" ] || { sed 1d "$FX/$key.result"; return "$(sed -n '1s/^rc=//p' "$FX/$key.result")"; }
+  [ ! -f "$FX/$key.intent" ] || { echo "effect $key: intended before, outcome unknown" >&2; return 75; }
+  act "intent $TASK/$key" intend "$key" "$*" || return 75
+  tmp=$(mktemp); echo "rc=?" >"$tmp"
+  INTENT=$(git rev-parse HEAD) "$@" >>"$tmp" 2>&1; rc=$?
+  sed -i "1s/.*/rc=$rc/" "$tmp"; sed 1d "$tmp"
+  act "result $TASK/$key rc=$rc" record "$key" "$tmp"; rm -f "$tmp"; return "$rc"
 }
 
-beat() { # heartbeat: signed empty commit, overwritten ref (not history)
-    git commit -qS --allow-empty -m "beat $ID"
-    git push -qf origin HEAD:refs/heartbeat/"$ID"
+eligible() { for n in $(sed -n 's/^needs: *//p' "$1"); do
+               case " $CAPS " in *" $n "*) ;; *) return 1 ;; esac; done; }
+
+# Any body may reap; the remote's hook is the judge of whether a claim is really dead.
+reap() {
+  now=$(date +%s); lease=$(sed -n 's/^lease: *//p' soul/policy)
+  for d in claimed/*/; do
+    w=$(basename "$d"); [ -d "$d" ] && [ "$w" != "$ID" ] || continue
+    seen=$(git log -1 --format=%ct "refs/heartbeat/$w" -- 2>/dev/null)
+    [ $((now - ${seen:-0})) -le "${lease:?soul/policy has no lease}" ] || act "reap $w" requeue "$w"
+  done
 }
 
-alive() { # alive <id>: heartbeat newer than lease?
-    hb=$(git rev-parse refs/heartbeat/"$1" 2>/dev/null) || return 1
-    t=$(git log -1 --format=%ct "$hb" 2>/dev/null) || return 1
-    lease=$(git show main:soul/policy | sed -n 's/^lease: //p')
-    [ $(( $(date +%s) - t )) -lt "${lease:-3600}" ]
+tick() {
+  sync || exit 0                                    # offline: nothing can happen, so nothing does
+  beat
+  [ "$(cat "bodies/$ID/manifest" 2>/dev/null)" = "caps: $CAPS" ] || act "manifest $ID" publish
+  [ -z "${REAP:-}" ] || reap
+  [ -n "${EXEC:-}" ] || exit 0
+
+  TASK=$(ls "claimed/$ID" 2>/dev/null | grep -v '\.fx$' | head -n1)   # an unfinished claim comes first
+  [ -n "$TASK" ] || for f in inbox/*; do
+    [ -f "$f" ] && eligible "$f" || continue
+    TASK=${f#inbox/}; act "claim $TASK" claim "$TASK" && break; TASK=
+  done
+  [ -n "$TASK" ] || exit 0                          # idle ticks leave no commit, only the heartbeat
+
+  FX="claimed/$ID/$TASK.fx"; out=$(mktemp -d)
+  export TASK AGENT_ID="$ID" REPO="$PWD" TICK="$PWD/tick.sh"
+  ( exec 9>&- >/dev/null 2>&1; while sleep "$BEAT" && kill -0 $$ 2>/dev/null; do beat; done ) & hb=$!
+  "$EXEC" "claimed/$ID/$TASK" "$out" >"$out/log" 2>&1; echo $? >"$out/status"
+  kill "$hb" 2>/dev/null
+  act "done $TASK" finish "$out"; rm -rf "$out"     # failure is a result too: it lands in done/ with its status
 }
 
-caps_ok() { # caps_ok <taskfile>: task's needs: line is subset of $CAPS
-    need=$(sed -n 's/^needs: //p' "$1" | head -1)
-    [ -z "$need" ] && return 0
-    case " $CAPS " in *" $need "*) return 0;; esac
-    return 1
+main() {
+  FX="claimed/$ID/$TASK.fx"
+  case ${1:-tick} in
+    effect) shift; effect "$@" ;;
+    tick)   exec 9>"$G/tick.lock"; flock -n 9 || exit 0; tick ;;   # one tick per body at a time
+    *)      die "usage: tick.sh [effect KEY -- CMD...]" ;;
+  esac
 }
-
-# --- section 1: publish my manifest ------------------------------------------
-mutate "manifest $ID" sh -c "mkdir -p bodies/$ID && echo \"caps: $CAPS\" > bodies/$ID/manifest"
-
-# --- section 2: claim ----------------------------------------------------------
-for t in inbox/*; do
-    [ -e "$t" ] || break
-    task=$(basename "$t")
-    caps_ok "$t" || continue
-    mutate "claim $task" sh -c "mkdir -p claimed/$ID && git mv \"$t\" claimed/$ID/" \
-        && { claimed=1; break; }
-done
-[ "${claimed:-0}" = 1 ] || { beat; exit 0; } # nothing for us: beat, no commit
-
-# --- section 3: reap -----------------------------------------------------------
-if [ "${REAP:-0}" = 1 ]; then
-    for c in claimed/*/; do
-        [ -d "$c" ] || continue
-        owner=$(basename "$(dirname "$c")")
-        [ "$owner" = "$ID" ] && continue
-        alive "$owner" && continue
-        task=$(basename "$c")
-        mutate "reap $task from $owner" sh -c "git mv \"$c\" inbox/ 2>/dev/null || true"
-    done
-fi
-
-# --- section 4: effect (rule 4 -- intent before effect) -------------------------
-effect() { # tick.sh effect KEY -- CMD...  run only by the executor
-    task=$TASK key=$1; shift 2
-    d=claimed/$ID/$task.fx
-    mkdir -p "$d"
-    if [ -e "$d/$key.result" ]; then
-        cat "$d/$key.result"; exit 0 # replay, never re-run
-    fi
-    if [ -e "$d/$key.intent" ]; then
-        log "in doubt: $key ran, result unknown"; exit 75
-    fi
-    mutate "intent $task/$key" sh -c "mkdir -p \"$d\" && echo . > \"$d/$key.intent\""
-    export INTENT=$(git rev-parse HEAD)
-    "$@" > "$d/$key.result"; rc=$?
-    mutate "result $task/$key" sh -c "true"
-    cat "$d/$key.result"; exit $rc
-}
-case ${1:-} in effect) shift; effect "$@";; esac
-
-# --- section 5: work my claim ----------------------------------------------------
-mine=$(ls claimed/$ID/* 2>/dev/null | head -1)
-[ -n "$mine" ] || { beat; exit 0; }
-task=$(basename "$mine")
-# heartbeat in background while the executor works
-( trap 'kill $beatpid 2>/dev/null' EXIT INT TERM; while sleep "$BEAT"; do beat; done ) &
-beatpid=$!
-# the executor does the work; tick.sh effect is its only way to touch the world
-status=0
-mkdir -p .tick
-TASK="$task" "$EXEC" "claimed/$ID/$task" "done/$task" > .tick/out 2>&1 || status=$?
-kill $beatpid 2>/dev/null; wait 2>/dev/null
-mutate "done $task" sh -c "mkdir -p done/$task && cp -r \"claimed/$ID/$task\" \"done/$task/task\" && cp .tick/out \"done/$task/log\" && echo $status > \"done/$task/status\" && rm -rf \"claimed/$ID/$task\" \"claimed/$ID/$task.fx\""
+main "$@"; exit $?   # keep on one line: the file is replaced under us by sync, so it must be fully read by now

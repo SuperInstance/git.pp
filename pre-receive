@@ -1,44 +1,62 @@
 #!/bin/sh
-# pre-receive -- the remote's only law. Install it by hand in the bare repo's hooks/ directory.
-# Judges every pushed commit against the PARENT's signers and policy (rule 5),
-# and every changed path against one-writer-per-path (rule 3).
-set -u
-Z=0000000000000000000000000000000000000000
-die() { echo "pre-receive: $*" >&2; exit 1; }
+# pre-receive -- the remote's only law. Install it by hand in the bare repo's hooks/ directory
+# AFTER seeding main with an owner-signed genesis (soul/allowed_signers, soul/policy).
+# Pushes cannot change this file: it is the trust root, so it is not part of the tree's authority.
+#
+# Every commit is judged by its PARENT's soul/allowed_signers and soul/policy, so no commit can
+# authorize itself. Identity is the signing key's principal, never the author string or a trailer.
+S=$(mktemp); trap 'rm -f "$S"' EXIT
+Z=$(git hash-object -t tree /dev/null | tr 0-9a-f 0)
 
-signer_of() { # signer_of <commit> <signers-blob>: prints principal or nothing
-    git -c gpg.ssh.allowedSignersFile="$2" log -1 --format=%GS "$1" 2>/dev/null
+no()     { echo "rejected: $*" >&2; exit 1; }
+has()    { git cat-file -e "$1" 2>/dev/null; }
+blob()   { git rev-parse -q --verify "$1" 2>/dev/null; }
+policy() { git show "$p:soul/policy" 2>/dev/null | sed -n "s/^$1: *//p"; }
+signer() { # signer <commit> <trust-commit> -> prints the principal, or fails
+  git show "$2:soul/allowed_signers" >"$S" 2>/dev/null || return 1
+  set -- $(git -c gpg.ssh.allowedSignersFile="$S" log -1 --format='%G? %GS' "$1" 2>/dev/null)
+  [ "${1:-}" = G ] && echo "$2"
+}
+stale()  { # has body $1 gone a full lease without a heartbeat?
+  seen=$(git log -1 --format=%ct "refs/heartbeat/$1" -- 2>/dev/null); lease=$(policy lease)
+  [ -n "$lease" ] && [ $(($(date +%s) - ${seen:-0})) -gt "$lease" ]
 }
 
-while read old new ref; do
-    [ "$ref" = refs/heads/main ] || {
-        case $ref in refs/heartbeat/*) ;; *) die "only main and heartbeats move";; esac
-    }
-    [ "$new" != "$Z" ] || die "deleting refs is forbidden"
-    [ "$old" = "$Z" ] && die "main is seeded by the owner, not created by push"
-    range=$([ "$old" = "$Z" ] && echo "$new" || echo "$old..$new")
-    # RULE 2 -- main only moves forward. This is the compare-and-swap every claim relies on.
-    [ "$old" != "$Z" ] && git merge-base --is-ancestor "$old" "$new" || die "non-fast-forward"
-    # verify each commit against its parent's signers (rule 5)
-    for c in $(git rev-list --reverse "$range"); do
-        p=$(git rev-parse "$c^" 2>/dev/null || echo "$Z")
-        [ "$p" = "$Z" ] && die "no root commits via push"
-        git cat-file -e "$p:soul/allowed_signers" 2>/dev/null || die "no signers at $p"
-        s=$(mktemp); git show "$p:soul/allowed_signers" > "$s"
-        who=$(signer_of "$c" "$s"); rm -f "$s"
-        [ -n "$who" ] || die "unsigned or unknown key: $c"
-        owner=$(git show "$p:soul/policy" 2>/dev/null | sed -n 's/^owner: //p')
-        [ -n "$owner" ] || die "no policy at $p"
-        if [ "$who" != "$owner" ]; then
-            # non-owner commits may only touch their own claim/effect paths
-            for f in $(git diff-tree --no-commit-id --name-only -r "$c"); do
-                case $f in
-                    claimed/$who/*|bodies/$who/*|inbox/*) ;;
-                    *) die "$who may not write $f";;
-                esac
-            done
-        fi
-        # no merges, ever: git merges text, not meaning (rule 3)
-        [ $(git rev-list --parents -n 1 "$c" | wc -w) -le 2 ] || die "merge commit"
-    done
+while read -r old new ref; do
+  case $ref in
+    refs/heads/main) ;;
+    refs/heartbeat/*)   # liveness: overwritable, but only by the body it names
+      [ "$(signer "$new" refs/heads/main)" = "${ref#refs/heartbeat/}" ] || no "$ref: not signed by its body"
+      continue ;;
+    *) no "$ref: only main and heartbeats exist" ;;
+  esac
+
+  # RULE 2 -- main only moves forward. This is the compare-and-swap every claim relies on.
+  [ "$old" != "$Z" ] && [ "$new" != "$Z" ] && git merge-base --is-ancestor "$old" "$new" ||
+    no "main is append-only"
+
+  for c in $(git rev-list --reverse "$old..$new"); do
+    ! has "$c^2" || no "$c: merge commit (re-decide from the tip instead)"
+    p=$(git rev-parse "$c^")
+    who=$(signer "$c" "$p") || no "$c: no signature trusted by its parent"          # RULE 5
+    ! policy owner | grep -qxF "$who" || continue                                   # owners may write anything
+
+    # RULE 3 -- one writer per path. No rename detection: every path is judged on its own.
+    git diff-tree -r --no-renames --name-status "$p" "$c" | while read -r st path; do
+      t=${path#*/}
+      case $path in *[!A-Za-z0-9._/-]*) no "$path: unsafe name" ;; esac
+      case "$st $path" in
+        "A inbox/"*) ;;                                           # anyone may add work
+        "D inbox/"*)                                              # ...but it only leaves by being claimed
+          [ "$(blob "$c:claimed/$who/$t")" = "$(blob "$p:$path")" ] || no "$path: removed without claiming it" ;;
+        ?" claimed/$who/"* | ?" bodies/$who/"*) ;;                # a body is sovereign in its own directories
+        "D claimed/"*)                                            # reap: only a dead body, only back to inbox, unchanged
+          { stale "${t%%/*}" && [ "$(blob "$c:inbox/${t#*/}")" = "$(blob "$p:$path")" ]; } ||
+            no "$path: ${t%%/*} is alive, or the task was not returned intact" ;;
+        "A done/"*)                                               # results come only from the claim holder
+          has "$p:claimed/$who/${t%%/*}" || no "$path: $who does not hold that claim" ;;
+        *) no "$st $path: not $who's to write" ;;                 # soul/, PROTOCOL.md, done/ edits, everything else
+      esac
+    done || exit 1
+  done
 done
