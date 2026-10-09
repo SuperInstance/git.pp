@@ -70,12 +70,16 @@ same intention comes out. No loss at any handoff — that is the bar.
 
 ## What's here
 
+- `ARCHITECTURE.md` — the whole system, end to end: substrate, projection,
+  perception, gates, independence, the agent, and the build order.
+- `research/` — the evidence behind the calibration and audit design.
 - `tick.sh` — the mechanical spine: claim, run, receipt. One task per
   tick, push is the lock.
 - `pre-receive` — the hook: one writer per path, intent before effect.
 - `nexus.py` — the reverse index: hash → coordinates. Spin around any
   blob and see everywhere it occurs.
-- `test.sh` — the harness. 57 checks.
+- `test.sh` — the substrate harness. 57 checks.
+- `project.sh`, `post-receive`, `soul/axes` — derived views; `test-pp.sh`, 40 checks.
 - `NOTES.md` — known caveats, honestly listed.
 
 ## Status
