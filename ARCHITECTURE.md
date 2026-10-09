@@ -237,7 +237,10 @@ gives the complete list of items it changed its mind about, with no noise.
 
 ## Layer 4: the window compiler
 
-**Status: v0 built in `jev-semantic` (`window.py`). The full design is below.**
+**Status: v1 built and tested here (`window.py`, 13 checks in `test-window.sh`).** It reads
+the judgment-log refs and the ledger instead of a local file, pins the main commit and every log
+tip in its header, and reproduces an earlier window byte for byte on any body when given those
+pins. `jev-semantic`'s `window2.py` is the v0 it supersedes.
 
 The compiler turns a task into a brief: the dense local context an agent needs, compiled
 rather than searched. It is a pure function of pinned inputs, so a brief can be reproduced and
@@ -504,8 +507,8 @@ where people or other systems are the environment.
 | 6 | Region gate | **Built, unit and end-to-end tests** (`gate.py`) | Bound reproduces the audit table (60 clean items: 4.9%; 150: 2.0%; 60 with one error: 7.7%) |
 | 7 | Track records and routing | **Built** (`ledger.py`, `gate.choose`), including each labeller's weekly Brier against world outcomes | — |
 | 8 | Ship gate | **Built, unit tests** (`shipgate.py`): a release that nets +5 in a region but breaks 5 items there is blocked; a gate configuration that acts on more wrong verdicts is blocked; a labeller that errs where the judge errs is flagged | — |
-| 9 | Window compiler v1 | Partly built (`window.py`) | Briefs are byte-identical on a second body and stored with results |
-| 10 | Agent harness v2: charter, consolidation, commitments as forecasts | **Forecasts built, 7 checks** (`forecast.py`) | Remaining: window compiler reads the charter and a verbatim slice of outside input |
+| 9 | Window compiler v1 | **Built, 13 checks** (`window.py`): charter, task, judgments, open questions, precedents with failures first, pins | Remaining: the executor stores each window with its result |
+| 10 | Agent harness v2: charter, consolidation, commitments as forecasts | **Forecasts built, 7 checks** (`forecast.py`); the window compiler puts the charter first | Remaining: a verbatim slice of recent outside input in each window |
 | 11 | Ensembles and density scores | Deferred | Adopted only where audits show plain confidence ranks errors poorly |
 
 ## Experiments only this system can run cheaply

@@ -21,5 +21,7 @@ jobs:
         run: ./test-audit.sh
       - name: forecasts (forecast.py + pre-receive)
         run: ./test-forecast.sh
+      - name: window compiler (window.py)
+        run: ./test-window.sh
       - name: unit tests
         run: python3 -m unittest discover -s tests -v
