@@ -134,9 +134,17 @@ one hash; `project.sh verify` does this and refuses any source not on trusted ma
 running its projector. The nexus (`by-hash`) maps every blob ever seen to every commit and path
 where it appeared.
 
-Measured cost: a rebuild after one push took 0.3 s at 1,500 commits, 0.9 s at 6,000 and 19 s at
-60,000, and the pusher waits for it. It must become incremental before history reaches tens of
-thousands of commits.
+Measured cost: a full rebuild took 0.3 s at 1,500 commits, 0.9 s at 6,000 and 19–23 s at 60,000,
+and the pusher waits for it. So publishing now extends the history views instead: the new
+commits' cells are built on their own and merged into the published trees, visiting only the
+subtrees they land in. At 60,000 commits one push now costs 2.7 s instead of 23 s, with an
+identical result. Verification always rebuilds from nothing, so an extension that differed would
+fail publicly; `test-pp-inc.sh` checks extension against a full rebuild after every push of a
+random history (including an axes change midway, which forces a rebuild).
+
+That property test found one real bug on the way: awk compared the bucket name `00` with an empty
+variable numerically, treated them as equal, and the merge dropped the whole `00` bucket. All
+name comparisons in the projector are now forced to strings, with a regression test.
 
 ## Layer 3: perception
 
