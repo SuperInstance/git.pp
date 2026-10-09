@@ -156,10 +156,23 @@ publish() { # all views move together or none do; views no longer declared are r
   } | git update-ref --stdin && cat "$T/built"
 }
 
+advance() { # advance refs/verified/main along the remote's main, checking every new commit's
+  # signature against its parent's signers, as tick.sh does. Stops at the first untrusted commit.
+  git fetch -q "$1" '+refs/heads/main:refs/remotes/'"$1"'/main' || return 0
+  old=$(git rev-parse -q --verify refs/verified/main) ||        # first use: trust only the genesis commit
+    { old=$(git rev-list --first-parent --max-parents=0 "refs/remotes/$1/main" | tail -1) &&
+      git update-ref refs/verified/main "$old"; } || return 0
+  for c in $(git rev-list --reverse "$old..refs/remotes/$1/main" 2>/dev/null); do
+    git show "$c^:soul/allowed_signers" >"$T/signers" 2>/dev/null &&
+      git -c gpg.ssh.allowedSignersFile="$T/signers" verify-commit "$c" 2>/dev/null || return 0
+    git update-ref refs/verified/main "$c"
+  done
+}
+
 verify() { # trust nothing but main: the views must be exactly what their source commit computes
   remote=${1:-origin}
-  trust=$(git rev-parse -q --verify "${TRUST:-refs/verified/main}" ||
-          git rev-parse -q --verify "refs/remotes/$remote/main") || die "no trusted main to verify against"
+  [ -n "${TRUST:-}" ] || advance "$remote"
+  trust=$(git rev-parse -q --verify "${TRUST:-refs/verified/main}") || die "no trusted main to verify against"
   git fetch -q --prune "$remote" '+refs/pp/*:refs/pp-seen/*' || die "cannot reach $remote"
   git for-each-ref --format='%(refname:lstrip=2) %(objectname)' refs/pp-seen/ >"$T/theirs"
   [ -s "$T/theirs" ] || die "$remote publishes no views"

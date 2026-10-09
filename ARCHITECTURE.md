@@ -131,7 +131,8 @@ after every push to main.
 A view commit is a pure function of the source commit: fixed author, the source's date, no
 signature. Any body can recompute it with the projector stored in that same commit and compare
 one hash; `project.sh verify` does this and refuses any source not on trusted main before
-running its projector. The nexus (`by-hash`) maps every blob ever seen to every commit and path
+running its projector. "Trusted main" is followed through signatures, exactly as a tick follows
+it: a fresh clone trusts only the genesis commit and checks every signature from there. The nexus (`by-hash`) maps every blob ever seen to every commit and path
 where it appeared.
 
 Measured cost: a full rebuild took 0.3 s at 1,500 commits, 0.9 s at 6,000 and 19–23 s at 60,000,

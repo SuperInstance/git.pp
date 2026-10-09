@@ -73,6 +73,7 @@ same intention comes out. No loss at any handoff — that is the bar.
 - `ARCHITECTURE.md` — the whole system, end to end: substrate, projection,
   perception, gates, independence, the agent, and the build order.
 - `research/` — the evidence behind the calibration and audit design.
+- `OPERATIONS.md` — standing the fleet up on real machines; every step is run by `test-ops.sh`.
 - `tick.sh` — the mechanical spine: claim, run, receipt. One task per
   tick, push is the lock.
 - `pre-receive` — the hook: one writer per path, intent before effect.

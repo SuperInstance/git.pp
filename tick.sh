@@ -47,7 +47,7 @@ act() {
     "$@" && git add -A && git commit -qS -m "$msg" --trailer "Body: $ID" --trailer "Task: ${TASK:--}" \
       --trailer "Model: ${MODEL:--}" --trailer "Soul: $(git rev-parse HEAD:soul)" \
       ${WINDOW:+--trailer "Window: $WINDOW"} || return 1
-    git push -q origin HEAD:main 2>/dev/null && return 0
+    git push -q origin HEAD:main 2>/dev/null && git update-ref refs/verified/main HEAD && return 0   # our own signed commit
   done
   return 1
 }
