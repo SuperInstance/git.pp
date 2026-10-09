@@ -18,6 +18,8 @@ Sections:
   What the judges see   the latest judgment per (subject, question, judge) for the task, the
                   hashes it names and the blobs at the paths it names, each read as settled,
                   conflict, ignorance or lean, with judges that disagree marked
+  Recently heard  the newest lines from outside voices (labeller, world and appeal judges),
+                  verbatim: what people and the world said, not what the judges inferred
   Open questions  unsettled pairs, judge disagreements, and active questions never asked here
   Precedents      done tasks that share an exact blob with this task's zone, failures first
   Recent activity the last commits on main
@@ -30,6 +32,7 @@ import jlog, ledger
 from ledger import argmax
 
 HEX = re.compile(r"\b[0-9a-f]{40}\b")
+OUTSIDE = ("labeller", "world", "appeal")
 PATHISH = re.compile(r"(?<![\w/.-])((?:[A-Za-z0-9._-]+/)+[A-Za-z0-9._-]+)")
 
 
@@ -120,6 +123,27 @@ def compile_window(repo, task_bytes, at, tips, agent=None, budget=12):
         shown_counts["judgments"] = max(0, len(rows) - budget)
     else:
         out.append("No judge has looked at anything in this window yet.")
+
+    # recently heard: outside voices, verbatim, newest first
+    out += ["", "## Recently heard", ""]
+    heard = []
+    for body, line in lines:
+        f = line.split("\t")
+        if len(f) >= 7 and roles.get(f[3]) in OUTSIDE:
+            heard.append((jlog.utc(f[0]), body, line))
+    heard.sort(key=lambda h: (h[0], h[1], h[2]), reverse=True)
+    n_heard = max(3, budget // 2)
+    if heard:
+        out.append("```")
+        for ts, body, line in heard[:n_heard]:
+            f = line.split("\t")
+            mark = " <- %s" % seeds[f[1]] if f[1] in seeds else ""
+            out.append("%s %s%s" % (body, "  ".join(f[:1] + [names.get(f[3], f[3][:12]), roles[f[3]],
+                                                       "about", f[1][:12], questions.get(f[2], f[2][:12])] + f[4:]), mark))
+        out.append("```")
+    else:
+        out.append("Nothing yet from a person or the world.")
+    shown_counts["outside lines"] = max(0, len(heard) - n_heard)
 
     # open questions
     out += ["", "## Open questions here", ""]

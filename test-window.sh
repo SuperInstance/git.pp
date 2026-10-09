@@ -22,7 +22,7 @@ clone seed casey; cd "$W/seed"; git remote add origin "$R" 2>/dev/null
 mkdir -p soul judges questions/safe done/001-fix done/002-bad bodies/laptop
 for k in casey laptop oracle; do echo "$k $(cut -d' ' -f1,2 "$W/keys/$k.pub")"; done > soul/allowed_signers
 printf 'owner: casey\nlease: 3600\n' > soul/policy
-printf 'name: student\nrole: judge\n' > judges/student.md; printf 'name: big\nrole: judge\n' > judges/big.md
+printf 'name: student\nrole: judge\n' > judges/student.md; printf 'name: big\nrole: judge\n' > judges/big.md; printf 'name: casey\nkind: human\nrole: labeller\n' > judges/casey.md
 printf 'Is this good?\n' > questions/root.md; printf 'Can this be undone?\n' > questions/safe/reversible.md
 printf 'rotate the uno key\n' > done/001-fix/task; printf 'rotated; old key revoked\n' > done/001-fix/result.md; echo 0 > done/001-fix/status
 printf 'rotate the kimi key\n' > done/002-bad/task; printf 'half rotated, kimi locked out\n' > done/002-bad/result.md; echo 75 > done/002-bad/status
@@ -49,6 +49,7 @@ yes  "the big model's verdict"          has w1.md "| big | 0.05 | 0.05 | 0.90 | 
 yes  "disagreement is an open question" has w1.md "questions/root.md about $(echo $T | cut -c1-12): judges disagree"
 yes  "and so is the never-asked one"    has w1.md "never asked of this task: questions/safe/reversible.md"
 yes  "precedents, failure first"        sh -c "grep -n '^- 00[12]' w1.md | head -1 | grep -q '002-bad: failed (status 75)'"
+yes  "no outside voice yet"             has w1.md "Nothing yet from a person or the world."
 yes  "and the success"                  has w1.md "- 001-fix: done; linked by done/001-fix/result.md (named in the task)"
 
 echo "2. pins make it reproducible"
@@ -62,6 +63,13 @@ cd "$W/oracle"; $WIN "$W/task.md" --agent laptop --at "$at" --tips "oracle=$tip"
 yes  "on a second body too"             cmp -s "$W/laptop/w1.md" w4.md
 cd "$W/laptop"; $WIN "$W/task.md" --agent laptop --budget 1 > w5.md
 yes  "a tight budget says what it cut"  has w5.md "more precedents"
+
+echo "3. recently heard"
+CA=$(rgit rev-parse main:judges/casey.md)
+cd "$W/oracle"; v2 "$T" "$Q" "$CA" 0.00 0.00 1.00 > j3; $J append --body oracle j3 >/dev/null
+cd "$W/laptop"; $WIN "$W/task.md" --agent laptop > w6.md
+yes  "a person's label is shown verbatim, tied to the task" sh -c "grep -q '^oracle .*  casey  labeller  about  $(echo $T | cut -c1-12)  questions/root.md  0.0000  0.0000  1.0000.* <- this task\$' w6.md"
+not  "a judge's inference is not"       sh -c "sed -n '/^## Recently heard/,/^## Open/p' w6.md | grep -q '  student  '"
 
 echo; echo "$pass passed, $fail failed"
 if [ -n "${KEEP:-}" ]; then echo "kept: $W"; else rm -rf "$W"; fi; [ "$fail" = 0 ]

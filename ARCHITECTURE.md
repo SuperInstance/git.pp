@@ -266,9 +266,12 @@ verified like a view.
 4. **Judgments:** the latest line per (subject, question, judge, body), each tagged settled,
    conflict, ignorance, disagreement or stale.
 5. **Questions:** map hashes to paths, pull ancestors, count settled and open per question.
-6. **Precedents:** done tasks linked to the zone, with outcomes. Bad outcomes rank first.
-7. **Budget:** fixed space per section; overflow counted under "Not shown".
-8. **Stamp:** write the pinned commits in the header, store the brief as
+6. **Recently heard:** the newest lines from outside voices (labellers, world judges, appeals),
+   verbatim and marked when they touch the zone. The judges' summaries above are inferences; this
+   is what a person or the world actually said, so the agent can tell the two apart.
+7. **Precedents:** done tasks linked to the zone, with outcomes. Bad outcomes rank first.
+8. **Budget:** fixed space per section; overflow counted under "Not shown".
+9. **Stamp:** write the pinned commits in the header, store the brief as
    `done/<task>/window.md`, and put a `Window:` trailer on the result commit. "What did the agent
    know when it acted?" is then one `git show`.
 
