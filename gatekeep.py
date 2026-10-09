@@ -93,7 +93,7 @@ def main(argv):
     jlog.git(repo, "fetch", "-q", remote, "+refs/heads/main:refs/remotes/%s/main" % remote)
     pol = read_policy(audit.main_file(repo, "soul/policy", remote))
     mans = ledger.manifests(repo, remote)
-    roles = {h: m.get("role", "judge") for h, m in mans.items()}
+    roles = ledger.roles_of(mans)
     led = ledger.Ledger(jlog.iter_log(repo, remote=remote), roles, tau=float(pol["tau"]))
     d, line = plan(opts["p"], regions, led, pol, judge, question, subject, opts["class"], "reversible" in flags)
     jlog.append(repo, body, [line], remote)

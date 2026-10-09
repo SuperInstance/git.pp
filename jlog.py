@@ -6,6 +6,9 @@
   jlog.py cat [--no-fetch] [--remote R] [BODY...]  print every line of every log (or the named
                                                     bodies' logs) as body<TAB>line, oldest first
   jlog.py validate [FILE]                          check lines without writing anything
+  jlog.py sync --body ID FILE                      append the lines of FILE that the body's log
+                                                    does not hold yet (for migrating a local
+                                                    v0 log, e.g. ~/judgment-log.tsv, by cron)
 
 Line format, tab-separated (ARCHITECTURE.md, layer 3):
   v2:  ts subject question judge neg zero pos sel prop [key=value ...]
@@ -203,7 +206,7 @@ def main(argv):
             opts["novalidate"] = True
         else:
             args.append(a)
-    if not args or args[0] not in ("append", "cat", "validate"):
+    if not args or args[0] not in ("append", "cat", "validate", "sync"):
         print(__doc__.strip(), file=sys.stderr)
         return 2
     cmd, rest = args[0], args[1:]
@@ -224,8 +227,14 @@ def main(argv):
         return 0
     body = opts.get("body") or os.environ.get("AGENT_ID")
     if not body:
-        print("append needs --body or AGENT_ID", file=sys.stderr)
+        print("%s needs --body or AGENT_ID" % cmd, file=sys.stderr)
         return 2
+    if cmd == "sync":
+        held = {l for b, l in iter_log(repo, [body], opts["remote"])}
+        lines = [l for l in dict.fromkeys(l for l in lines if l.strip()) if l not in held]
+        if not lines:
+            print("up to date")
+            return 0
     print(append(repo, body, lines, opts["remote"]))
     return 0
 

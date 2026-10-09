@@ -262,7 +262,7 @@ def main(argv):
         seed = open(seed_file).read().strip()
         judge, n_max = opts["judge"], int(opts.get("n", "5"))
         mans = ledger.manifests(repo, remote)
-        roles = {h: m.get("role", "judge") for h, m in mans.items()}
+        roles = ledger.roles_of(mans)
         led = ledger.Ledger(jlog.iter_log(repo, remote=remote), roles, tau=float(opts.get("tau", "0.8")))
         wrong = [(s, q, j) for jd, q, _, j, label, _ in led.scored() for s in [j.subject]
                  if jd == judge and max(j.p) >= led.tau and ledger.argmax(j.p) != label]

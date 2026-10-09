@@ -154,7 +154,7 @@ def main(argv):
         return 2
     repo, q = os.getcwd(), opts.get("question")
     jlog.git(repo, "fetch", "-q", opts["remote"], "+refs/heads/main:refs/remotes/%s/main" % opts["remote"])
-    roles = {h: m.get("role", "judge") for h, m in ledger.manifests(repo, opts["remote"]).items()}
+    roles = ledger.roles_of(ledger.manifests(repo, opts["remote"]))
     lines = list(jlog.iter_log(repo, remote=opts["remote"]))
     if args[0] == "churn":
         led = ledger.Ledger(lines, roles)

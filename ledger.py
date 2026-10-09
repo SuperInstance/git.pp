@@ -171,6 +171,17 @@ class Ledger:
         return changed / total if total else None
 
 
+def roles_of(mans):
+    """{judge id: role}. Each manifest is reachable by its blob hash and, for v0 lines that carry
+    a judge's name instead of a hash, by its `name:`."""
+    roles = {}
+    for h, m in mans.items():
+        roles[h] = m.get("role", "judge")
+        if m.get("name"):
+            roles.setdefault(m["name"], roles[h])
+    return roles
+
+
 def main(argv):
     opts, it = {"remote": "origin", "tau": "0.8"}, iter(argv)
     for a in it:
@@ -179,7 +190,7 @@ def main(argv):
     repo = os.getcwd()
     jlog.git(repo, "fetch", "-q", opts["remote"], "+refs/heads/main:refs/remotes/%s/main" % opts["remote"])
     mans = manifests(repo, opts["remote"])
-    roles = {h: m.get("role", "judge") for h, m in mans.items()}
+    roles = roles_of(mans)
     names = {h: m.get("name", h[:12]) for h, m in mans.items()}
     led = Ledger(jlog.iter_log(repo, remote=opts["remote"]), roles, tau=float(opts["tau"]))
     rows = sorted(led.table().items(), key=lambda kv: -kv[1]["brier"])

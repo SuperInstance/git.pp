@@ -48,6 +48,11 @@ cd "$W/laptop"; yes "laptop appends its own" sh -c "printf '%s\n' '$L2' | $J app
 same "cat reads every body, in order" "$(cd "$W/laptop" && $J cat | cut -f1,3 | tr '\t\n' ': ')" "laptop:$S2 oracle:$S1 oracle:$S2 oracle:$S1 "
 same "cat can pick one body"          "$(lines laptop oracle)" 3
 
+L3=$(printf '2026-10-08T09:00:00\t%s\t%s\tintuition-student-v1\t0.2000\t0.3000\t0.5000' "$S2" "$Q")
+cd "$W/oracle"; printf '%s\n%s\n%s\n%s\n' "$L0" "$L1" "$L3" "$L3" > local.tsv   # a local log: two lines already pushed, one new twice
+out=$($J sync --body oracle local.tsv); same "sync appends only what the log lacks" "$(lines oracle oracle)" 4
+same "and is a no-op the second time" "$($J sync --body oracle local.tsv)" "up to date"
+
 echo "2. what the hook refuses"
 cd "$W/laptop"; T=$(logtip oracle)
 not  "laptop writing oracle's log"    sh -c "printf '%s\n' '$L1' | $J append --body oracle"
