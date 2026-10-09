@@ -248,7 +248,7 @@ gives the complete list of items it changed its mind about, with no noise.
 
 ## Layer 4: the window compiler
 
-**Status: v1 built and tested here (`window.py`, 13 checks in `test-window.sh`).** It reads
+**Status: v1 built and tested here (`window.py`, 16 checks in `test-window.sh`).** It reads
 the judgment-log refs and the ledger instead of a local file, pins the main commit and every log
 tip in its header, and reproduces an earlier window byte for byte on any body when given those
 pins. `jev-semantic`'s `window2.py` is the v0 it supersedes.
@@ -524,12 +524,12 @@ where people or other systems are the environment.
 | 2 | Projection: axes, projector, post-receive | **Built, 40 checks** | — |
 | 3 | Log v2: schema, writer to per-body refs, hook rule | **Built, 23 checks** (`jlog.py`, `pre-receive`) | Remaining: backfill the live v0 log from `~/judgment-log.tsv` with `jlog.py append` |
 | 4 | Audit stream: commit-reveal selector, blind tasks, fault drills | **Built, 28 end-to-end checks** (`audit.py`) | — |
-| 5 | Shadow judgments, exploration, bypass slice | **Built** (`gatekeep.py`): every decision is logged with why, regions and a configuration hash; escalations become review tasks | Remaining: call it from each body's executor |
+| 5 | Shadow judgments, exploration, bypass slice | **Built** (`gatekeep.py`): every decision is logged with why, regions and a configuration hash; escalations become review tasks; `agent-exec.sh` gates whatever the agent judged during a task as one batch and keeps `gate.jsonl` with the result | — |
 | 6 | Region gate | **Built, unit and end-to-end tests** (`gate.py`) | Bound reproduces the audit table (60 clean items: 4.9%; 150: 2.0%; 60 with one error: 7.7%) |
 | 7 | Track records and routing | **Built** (`ledger.py`, `gate.choose`), including each labeller's weekly Brier against world outcomes | — |
 | 8 | Ship gate | **Built, unit tests** (`shipgate.py`): a release that nets +5 in a region but breaks 5 items there is blocked; a gate configuration that acts on more wrong verdicts is blocked; a labeller that errs where the judge errs is flagged | — |
-| 9 | Window compiler v1 | **Built, 13 checks** (`window.py`): charter, task, judgments, open questions, precedents with failures first, pins; `agent-exec.sh` stores each window with its result and the tick records its hash as a `Window:` trailer | — |
-| 10 | Agent harness v2: charter, consolidation, commitments as forecasts | **Forecasts built, 7 checks** (`forecast.py`); the window compiler puts the charter first | Remaining: a verbatim slice of recent outside input in each window |
+| 9 | Window compiler v1 | **Built, 16 checks** (`window.py`): charter, task, judgments, a verbatim slice of outside voices, open questions, precedents with failures first, pins; `agent-exec.sh` stores each window with its result and the tick records its hash as a `Window:` trailer | — |
+| 10 | Agent harness v2: charter, consolidation, commitments as forecasts | **Forecasts built, 7 checks** (`forecast.py`); the window compiler puts the charter first and shows recent outside input verbatim | Remaining: consolidation (periodic summaries of a body's own history, judged like any other output) |
 | 11 | Ensembles and density scores | Deferred | Adopted only where audits show plain confidence ranks errors poorly |
 
 ## Experiments only this system can run cheaply

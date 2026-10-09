@@ -33,6 +33,7 @@ for step in "$W"/step-*; do
     "move the local"*)  [ "$(echo "$out" | tail -1)" = "up to date" ] && ok "  the second sync appends nothing" || bad "  the second sync appends nothing" ;;
     "verify the auditor"*) echo "$out" | grep -q '^ok: 1 selected' && ok "  the audit selected the one judged item and verified" || bad "  audit verify ($out)" ;;
     "gate a batch"*)    echo "$out" | grep -q '"action": "escalate"' && echo "$out" | grep -q '"review": "review-' && ok "  an unaudited judge escalates to a review task" || bad "  gate ($out)" ;;
+    "tick: the agent judges"*) echo "$out" | tail -1 | grep -q '"action": "escalate"' && ok "  the agent's judgment went through the gate" || bad "  exec gate ($out)" ;;
     "resolve the forecast"*) [ "$(echo "$out" | head -1)" = "bodies/laptop/forecasts/hello.md" ] && ok "  the forecast was open" || bad "  forecast open ($out)"
                         [ "$(echo "$out" | tail -1 | tr -d ' ')" = 0 ] && ok "  and is resolved" || bad "  forecast resolved ($out)" ;;
   esac

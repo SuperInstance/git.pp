@@ -191,6 +191,24 @@ printf '%s %s %s 0.02 0.03 0.95\n' "$(printf 'deploy' | git hash-object --stdin)
 AGENT_ID=oracle python3 gatekeep.py --batch ~/batch
 ```
 
+A body's agent reaches the gate through `agent-exec.sh`: whatever it writes to `judgments` in
+its result directory is gated as one batch, and the decisions are kept beside the result.
+
+```sh
+# [casey] drop a task that needs judging
+cd ~/fleet && git pull -q
+printf '# Check the deploy\n\nIs the deploy plan safe?\n' > inbox/002-check
+git add inbox/002-check && git commit -qS -m "task 002-check" && git push -q origin main
+```
+
+```sh
+# [oracle] tick: the agent judges, the gate decides
+cd ~/fleet && git fetch -q && export ST=$(git rev-parse origin/main:judges/student.md) Q=$(git rev-parse origin/main:questions/root.md)
+AGENT_ID=oracle CAPS=cpu EXEC="$PWD/agent-exec.sh" \
+  AGENT_CMD='printf "%s %s %s 0.10 0.10 0.80\n" "$(git hash-object window.md)" "$Q" "$ST" > judgments' sh tick.sh
+git pull -q && cat done/002-check/gate.jsonl
+```
+
 ## 10. Forecasts
 
 An agent's work is scored by the world, not by itself. When it makes something it publishes a
