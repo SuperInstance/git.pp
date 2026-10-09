@@ -42,7 +42,9 @@ PY
 
 echo "1. commit, select, label, reveal, verify"
 cd "$W/oracle"
-yes  "oracle commits period p1"       $A commit --period p1 --auditor oracle --rate 0.25 --start 2026-10-09T00:00:00 --end 2026-10-10T00:00:00
+# p1's seed is fixed so the statistical checks below are exact, not right 99% of the time:
+# it selects 109 items, 55 of them negative verdicts, 49% of those wrong (all near the expectation)
+yes  "oracle commits period p1"       $A commit --period p1 --auditor oracle --rate 0.25 --seed "$(printf '33%.0s' $(seq 32))" --start 2026-10-09T00:00:00 --end 2026-10-10T00:00:00
 not  "a period is committed once"     $A commit --period p1 --auditor oracle --rate 0.5
 same "the seed itself is not on main" "$(rgit grep -c "$(cat .git/audit/p1.seed)" main -- . | wc -l | tr -d ' ')" 0
 cd "$W/laptop"; yes "the judge logs 400 verdicts" $J append --body laptop batch

@@ -4,6 +4,8 @@
   audit.py commit --period P [--rate R] [--rate-for QUESTION R ...] [--start TS] [--end TS]
       Make a fresh secret seed, keep it in .git/audit/P.seed, and publish
       bodies/<auditor>/audit/P.commit on main: the seed's SHA-256, the time window and the rates.
+      --seed HEX fixes the seed instead (64 hex digits), for reproducible tests. The commitment,
+      not the seed's origin, is what keeps judges from predicting it; still, let it be random.
   audit.py select --period P
       Select every judged (subject, question) in the window whose keyed hash falls under its
       rate, and drop each as a blind task in inbox/. Selection reads only the content key, never
@@ -27,7 +29,7 @@ a judgment with sel=audit, prop=<the task's rate>, seed=<period> and blind=1. Re
 review tasks (real escalations and drills look the same) with sel=appeal and review=<task name>.
 Standard library only.
 """
-import hashlib, hmac, os, secrets, subprocess, sys, time
+import hashlib, hmac, os, re, secrets, subprocess, sys, time
 import jlog
 
 TASK_PREFIX = "audit-"
@@ -227,7 +229,10 @@ def main(argv):
         if main_file(repo, base + ".commit") is not None:
             print("period %s is already committed" % period, file=sys.stderr)
             return 1
-        seed = secrets.token_hex(32)
+        seed = opts.get("seed") or secrets.token_hex(32)
+        if not re.fullmatch(r"[0-9a-f]{64}", seed):
+            print("--seed must be 64 hex digits", file=sys.stderr)
+            return 2
         os.makedirs(os.path.dirname(seed_file), exist_ok=True)
         with open(seed_file, "w") as f:
             f.write(seed + "\n")
