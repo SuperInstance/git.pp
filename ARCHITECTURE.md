@@ -463,8 +463,9 @@ A new student or rubric ships through a gate that reads the log:
 
 ## Layer 7: the agent
 
-**Status: commitments as forecasts are built and tested here (`forecast.py`); the charter and
-consolidation are conventions, below.**
+**Status: built and tested here.** Commitments as forecasts (`forecast.py`, 7 checks), the
+compiled memory page (`consolidate.py`, 15 checks), and the charter and memory read first in
+every window (`window.py`).
 
 An agent here is a model plus three harnesses: a way to hear, a way to remember, and a way to
 make. It needs no code execution. The research supports three load-bearing constraints and adds
@@ -480,9 +481,15 @@ two:
 
 What this means for the repo:
 
-- **Two strata.** The raw log of what was heard and made is never rewritten. Consolidations are
-  ordinary commits that revise summary files, made in idle time. Each window includes a verbatim
-  slice of outside input as well as the summaries.
+- **Two strata.** The raw log of what was heard and made is never rewritten. Above it,
+  `consolidate.py` compiles `bodies/<agent>/memory.md`: tasks finished (failures first, each with
+  its last log line), forecasts and how the world resolved them with the agent's Brier score,
+  what the gate did with its judgments, and where a person or the world resolved its verdicts
+  the other way. The page is compiled, not written: it carries its pins, and `verify` recomputes
+  it, so an agent cannot remember itself more kindly than the record allows (the test edits
+  "1 failed" to "0 failed" and verify refuses). A model-written reflection is a separate task
+  whose window includes the page, and its output is judged like any other. Each window shows the
+  memory after the charter, plus a verbatim slice of outside input.
 - **A charter** in the agent's directory, versioned like everything else.
 - **Commitments as forecasts.** Each thing the agent makes registers the question that will
   resolve it, so the hearing channel closes the loop with an outcome and the agent enters the
@@ -529,7 +536,7 @@ where people or other systems are the environment.
 | 7 | Track records and routing | **Built** (`ledger.py`, `gate.choose`), including each labeller's weekly Brier against world outcomes | — |
 | 8 | Ship gate | **Built, unit tests** (`shipgate.py`): a release that nets +5 in a region but breaks 5 items there is blocked; a gate configuration that acts on more wrong verdicts is blocked; a labeller that errs where the judge errs is flagged | — |
 | 9 | Window compiler v1 | **Built, 16 checks** (`window.py`): charter, task, judgments, a verbatim slice of outside voices, open questions, precedents with failures first, pins; `agent-exec.sh` stores each window with its result and the tick records its hash as a `Window:` trailer | — |
-| 10 | Agent harness v2: charter, consolidation, commitments as forecasts | **Forecasts built, 7 checks** (`forecast.py`); the window compiler puts the charter first and shows recent outside input verbatim | Remaining: consolidation (periodic summaries of a body's own history, judged like any other output) |
+| 10 | Agent harness v2: charter, consolidation, commitments as forecasts | **Forecasts built, 7 checks** (`forecast.py`); the window compiler puts the charter first and shows recent outside input verbatim ; memory pages compiled by `consolidate.py` (15 checks) and read first in every window | — |
 | 11 | Ensembles and density scores | Deferred | Adopted only where audits show plain confidence ranks errors poorly |
 
 ## Experiments only this system can run cheaply

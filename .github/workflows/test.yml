@@ -25,6 +25,8 @@ jobs:
         run: ./test-forecast.sh
       - name: window compiler (window.py)
         run: ./test-window.sh
+      - name: memory pages (consolidate.py)
+        run: ./test-consolidate.sh
       - name: the operations guide, executed (OPERATIONS.md)
         run: ./test-ops.sh
       - name: unit tests

@@ -14,6 +14,7 @@ with the result (e.g. done/<task>/window.md) and its hash in the commit.
 
 Sections:
   Charter         bodies/<agent>/charter.md, if the agent has one: what it is for
+  Memory          bodies/<agent>/memory.md, if published (consolidate.py): its own record
   Task            verbatim
   What the judges see   the latest judgment per (subject, question, judge) for the task, the
                   hashes it names and the blobs at the paths it names, each read as settled,
@@ -101,6 +102,12 @@ def compile_window(repo, task_bytes, at, tips, agent=None, budget=12):
 
     if agent and "bodies/%s/charter.md" % agent in files:
         out += ["", "## Charter", "", jlog.git(repo, "cat-file", "-p", files["bodies/%s/charter.md" % agent]).strip()]
+
+    if agent and "bodies/%s/memory.md" % agent in files:
+        mem = jlog.git(repo, "cat-file", "-p", files["bodies/%s/memory.md" % agent]).strip().splitlines()
+        kept = [("#" + l if l.startswith("## ") else l) for l in mem[1:]
+                if not l.startswith(("main@", "Compiled from"))]
+        out += ["", "## Memory", ""] + "\n".join(kept).strip().splitlines()
 
     out += ["", "## Task", "", task_text.strip()]
 

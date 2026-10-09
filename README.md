@@ -81,6 +81,11 @@ same intention comes out. No loss at any handoff — that is the bar.
   blob and see everywhere it occurs.
 - `test.sh` — the substrate harness. 57 checks.
 - `project.sh`, `post-receive`, `soul/axes` — derived views; `test-pp.sh`, 40 checks.
+- `jlog.py`, `audit.py`, `gate.py`, `ledger.py`, `gatekeep.py`, `shipgate.py` — perception and
+  calibration: judgment logs, the audit stream, the gate, track records, the ship gate.
+- `window.py`, `forecast.py`, `consolidate.py`, `agent-exec.sh` — the agent: compiled windows,
+  commitments as forecasts, a verifiable memory page, the reference executor.
+- `ARCHITECTURE.md` — the whole system, end to end, with what is built and tested.
 - `NOTES.md` — known caveats, honestly listed.
 
 ## Status

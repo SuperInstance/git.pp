@@ -56,7 +56,7 @@ laptop's agent. On a v2 log line a judge is named by its manifest's blob hash. E
 git clone -q "$REMOTE" ~/fleet 2>/dev/null; cd ~/fleet
 git config gpg.format ssh && git config user.signingkey ~/.ssh/fleet
 git config user.name casey && git config user.email casey@fleet
-for f in tick.sh project.sh agent-exec.sh jlog.py audit.py gate.py ledger.py gatekeep.py shipgate.py forecast.py window.py; do
+for f in tick.sh project.sh agent-exec.sh jlog.py audit.py gate.py ledger.py gatekeep.py shipgate.py forecast.py window.py consolidate.py; do
   cp "$GITPP/$f" .
 done
 mkdir -p soul judges questions && cp "$GITPP/soul/axes" soul/axes
@@ -238,7 +238,21 @@ AGENT_ID=casey python3 forecast.py resolve --judge "$(git rev-parse HEAD:judges/
 python3 forecast.py open | wc -l
 ```
 
-## 11. Schedules
+## 11. Memory
+
+Each body consolidates its own record into `bodies/<body>/memory.md`: what it finished and what
+failed, how its forecasts resolved, what the gate did with its judgments, and where people or
+the world corrected it. The page is compiled, not written, so any machine can check it; the
+window compiler puts it right after the charter.
+
+```sh
+# [laptop] consolidate memory and check it
+cd ~/fleet && git pull -q && AGENT_ID=laptop python3 consolidate.py publish
+python3 consolidate.py verify --body laptop
+git pull -q && cat bodies/laptop/memory.md
+```
+
+## 12. Schedules
 
 Run the tick from cron (or a systemd timer) on every body. Intervals follow the body's nature:
 fast where it is cheap, slow where it is expensive. The lease in `soul/policy` must be longer
