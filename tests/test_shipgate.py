@@ -103,5 +103,45 @@ class Drift(unittest.TestCase):
         self.assertEqual(d["model_drift"], 1.0)
 
 
+class Canary(unittest.TestCase):
+    def test_a_looser_threshold_that_acts_on_wrong_items_is_blocked(self):
+        lines = []
+        for i in range(400):
+            s = subj(0, i)
+            lines.append(ln(s, LAB, 1, "audit", blind="1"))
+            new = i % 2 == 1
+            wrong = new and i % 4 == 1                              # the new config acts on bad verdicts
+            lines.append(("x", jlog.format_line(s, Q, A, P[-1 if wrong else 1], "stream", 1.0,
+                                                gate="act", cfg="new" if new else "old")))
+        rows, blocked = shipgate.canary(ledger.Ledger(lines, ROLES, regions_of), "old", "new")
+        self.assertEqual(rows["all"]["new"]["errors"], 100)
+        self.assertIn("all", blocked)
+
+    def test_an_equal_config_rolls_out(self):
+        lines = []
+        for i in range(400):
+            s = subj(0, i)
+            lines.append(ln(s, LAB, 1, "audit", blind="1"))
+            lines.append(("x", jlog.format_line(s, Q, A, P[-1 if i % 10 == 0 else 1], "stream", 1.0,
+                                                gate="act", cfg="new" if i % 2 else "old")))
+        self.assertEqual(shipgate.canary(ledger.Ledger(lines, ROLES, regions_of), "old", "new")[1], [])
+
+
+class Independence(unittest.TestCase):
+    def test_a_copy_is_not_an_independent_labeller(self):
+        rnd = random.Random(9)
+        lines = []
+        for i in range(2000):
+            s = subj(0, i)
+            lines.append(ln(s, LAB, 1, "audit", blind="1"))
+            hard = rnd.random() < 0.2
+            lines.append(ln(s, A, -1 if hard else 1))
+            lines.append(ln(s, C, -1 if hard else 1))                # C errs exactly where A does
+            lines.append(ln(s, D, -1 if rnd.random() < 0.2 else 1))  # D errs on its own
+        led = ledger.Ledger(lines, ROLES, regions_of)
+        self.assertGreater(shipgate.independence(led, A, C)["ratio"], 3)
+        self.assertLess(abs(shipgate.independence(led, A, D)["ratio"] - 1), 0.4)
+
+
 if __name__ == "__main__":
     unittest.main()

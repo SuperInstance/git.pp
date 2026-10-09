@@ -336,7 +336,9 @@ Three mechanisms keep labels flowing into the regions the gate avoids:
 **Status: built and tested here.** The audit stream and fault drills (`audit.py`), track
 records and the labeller trend (`ledger.py`), and the ship gate with churn, verdict diff,
 polarization monitor and drift decomposition (`shipgate.py`). `test-audit.sh` (28 checks) runs
-them against the real hook; 35 unit tests cover the rest. Not built: the consumer registry.
+them against the real hook; unit tests cover the rest. `shipgate.py` also compares gate
+configurations (`canary`), measures a candidate labeller's independence from a judge
+(`independence`), and names every consumer listed in `soul/consumers` in its reports.
 
 Independence is the scarce input. This layer mints it cheaply, spends it where information is
 worth most, and records where it came from.
@@ -501,7 +503,7 @@ where people or other systems are the environment.
 | 5 | Shadow judgments, exploration, bypass slice | **Built** (`gatekeep.py`): every decision is logged with why, regions and a configuration hash; escalations become review tasks | Remaining: call it from each body's executor |
 | 6 | Region gate | **Built, unit and end-to-end tests** (`gate.py`) | Bound reproduces the audit table (60 clean items: 4.9%; 150: 2.0%; 60 with one error: 7.7%) |
 | 7 | Track records and routing | **Built** (`ledger.py`, `gate.choose`), including each labeller's weekly Brier against world outcomes | — |
-| 8 | Ship gate | **Built, unit tests** (`shipgate.py`): a release that nets +5 in a region but breaks 5 items there is blocked | Remaining: canary rollout for rubric and threshold content |
+| 8 | Ship gate | **Built, unit tests** (`shipgate.py`): a release that nets +5 in a region but breaks 5 items there is blocked; a gate configuration that acts on more wrong verdicts is blocked; a labeller that errs where the judge errs is flagged | — |
 | 9 | Window compiler v1 | Partly built (`window.py`) | Briefs are byte-identical on a second body and stored with results |
 | 10 | Agent harness v2: charter, consolidation, commitments as forecasts | **Forecasts built, 7 checks** (`forecast.py`) | Remaining: window compiler reads the charter and a verbatim slice of outside input |
 | 11 | Ensembles and density scores | Deferred | Adopted only where audits show plain confidence ranks errors poorly |

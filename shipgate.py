@@ -20,6 +20,20 @@ what it does to each region, not by its net score:
       judge's verdict mix across the split is change in the world; the old and new judges'
       disagreement on the same new content is change in the model.
 
+  shipgate.py canary --cfg-old X --cfg-new Y
+      Rubric, question and threshold changes are content, and need the same staging as new
+      weights. Compares decisions logged under two gate configurations (cfg= on each line):
+      per region, the share acted on and the error rate of acted items that were later
+      resolved. Blocks (exit 1) where the new configuration's acted error rate is clearly worse.
+  shipgate.py independence --judge J --labeller L
+      Before trusting L to label J's work: on items a third party resolved, how often both are
+      wrong, against what independence predicts, and how often they then pick the same wrong
+      answer. More accurate models make more correlated errors; a judge's own teacher is the
+      least independent labeller there is.
+
+Every report names the consumers of the judge listed in soul/consumers (lines of
+`<judge name or hash> <consumer> [what it does]`), so a change reaches everything that inherits it.
+
 Regions are the ledger's (judge-independent). Standard library only.
 """
 import math, os, sys
@@ -142,6 +156,63 @@ def drift(lines, old, new, split_ts, question=None):
             "before": mb, "after": ma, "n_before": sum(before.values()), "n_after": sum(after.values()), "n_both": both}
 
 
+def canary(led, cfg_old, cfg_new, z=2.0):
+    """Per region: for each configuration, items decided, share acted, acted-and-resolved, acted
+    errors. A region blocks when the new acted error rate exceeds the old by more than z
+    standard errors."""
+    rows = defaultdict(lambda: {c: [0, 0, 0, 0] for c in (cfg_old, cfg_new)})
+    for (judge, s, q), j in led.latest.items():
+        cfg = j.extra.get("cfg")
+        if cfg not in (cfg_old, cfg_new):
+            continue
+        acted = j.extra.get("gate") == "act"
+        res = led.resolution.get((s, q))
+        for r in ledger.regions_on(j) or led.regions_of(s, q):
+            a = rows[r][cfg]
+            a[0] += 1
+            a[1] += int(acted)
+            if acted and res is not None and judge not in res[2]:
+                a[2] += 1
+                a[3] += int(argmax(j.p) != res[0])
+    blocked = []
+    for r, by in rows.items():
+        (_, _, n0, e0), (_, _, n1, e1) = by[cfg_old], by[cfg_new]
+        if n0 and n1:
+            p0, p1, pool = e0 / n0, e1 / n1, (e0 + e1) / (n0 + n1)
+            se = math.sqrt(max(pool * (1 - pool), 1e-9) * (1 / n0 + 1 / n1))
+            if (p1 - p0) / se > z:
+                blocked.append(r)
+    return {r: {c: dict(zip(("n", "acted", "resolved", "errors"), v)) for c, v in by.items()} for r, by in rows.items()}, sorted(blocked)
+
+
+def independence(led, judge, labeller):
+    """On items resolved by neither: both-wrong count against independence, and how often two
+    wrong answers coincide (chance is 1/2: there are two wrong labels)."""
+    n = jw = lw = both = same = 0
+    for (s, q), (label, _, resolvers) in led.resolution.items():
+        if judge in resolvers or labeller in resolvers:
+            continue
+        a, b = led.latest.get((judge, s, q)), led.latest.get((labeller, s, q))
+        if a is None or b is None:
+            continue
+        n += 1
+        wa, wb = argmax(a.p) != label, argmax(b.p) != label
+        jw += wa; lw += wb
+        if wa and wb:
+            both += 1
+            same += int(argmax(a.p) == argmax(b.p))
+    expected = n * (jw / n) * (lw / n) if n else 0.0
+    return {"n": n, "judge_errors": jw, "labeller_errors": lw, "both_wrong": both,
+            "expected_both_wrong": expected, "ratio": both / expected if expected else None,
+            "same_wrong_answer": same / both if both else None}
+
+
+def consumers(repo, judge, names, remote="origin"):
+    text = jlog.git(repo, "show", "%s/main:soul/consumers" % remote, check=False)
+    keys = {judge, names.get(judge, "")}
+    return [l.split(None, 1)[1] for l in text.splitlines() if l.strip() and not l.startswith("#") and l.split()[0] in keys]
+
+
 def main(argv):
     opts, args, it = {"remote": "origin"}, [], iter(argv)
     for a in it:
@@ -149,13 +220,27 @@ def main(argv):
             opts[a[2:]] = next(it)
         else:
             args.append(a)
-    if not args or args[0] not in ("churn", "diff", "polarization", "drift"):
+    if not args or args[0] not in ("churn", "diff", "polarization", "drift", "canary", "independence"):
         print(__doc__.strip(), file=sys.stderr)
         return 2
     repo, q = os.getcwd(), opts.get("question")
     jlog.git(repo, "fetch", "-q", opts["remote"], "+refs/heads/main:refs/remotes/%s/main" % opts["remote"])
-    roles = ledger.roles_of(ledger.manifests(repo, opts["remote"]))
+    mans = ledger.manifests(repo, opts["remote"])
+    roles, names = ledger.roles_of(mans), {h: m.get("name", "") for h, m in mans.items()}
     lines = list(jlog.iter_log(repo, remote=opts["remote"]))
+    for jd in [opts.get("old"), opts.get("judge")]:
+        for c in consumers(repo, jd, names, opts["remote"]) if jd else []:
+            print("consumer of %s: %s" % (names.get(jd) or jd[:12], c))
+    if args[0] == "canary":
+        rows, blocked = canary(ledger.Ledger(lines, roles), opts["cfg-old"], opts["cfg-new"])
+        for r, by in sorted(rows.items()):
+            print("%-20s %s%s" % (r, "  ".join("%s: n=%d acted=%d resolved=%d errors=%d" % (c, v["n"], v["acted"], v["resolved"], v["errors"])
+                                               for c, v in sorted(by.items())), "  BLOCK" if r in blocked else ""))
+        print("BLOCKED" if blocked else "ok to roll out")
+        return 1 if blocked else 0
+    if args[0] == "independence":
+        print(independence(ledger.Ledger(lines, roles), opts["judge"], opts["labeller"]))
+        return 0
     if args[0] == "churn":
         led = ledger.Ledger(lines, roles)
         rows, blocked = churn(led, opts["old"], opts["new"], q, int(opts.get("max-broken", DEFAULT_MAX_BROKEN)),
