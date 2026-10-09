@@ -1,0 +1,21 @@
+name: test
+on: [push, pull_request]
+jobs:
+  suites:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        sh: [dash, bash]
+        awk: [mawk, gawk]
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get install -y -q dash mawk gawk
+      - name: substrate (tick + pre-receive)
+        run: SH=${{ matrix.sh }} ./test.sh
+      - name: projection (project.sh + post-receive)
+        run: SH=${{ matrix.sh }} AWK=${{ matrix.awk }} ./test-pp.sh
+      - name: judgment logs (jlog.py + pre-receive)
+        run: AWK=${{ matrix.awk }} ./test-log.sh
+      - name: unit tests
+        run: python3 -m unittest discover -s tests -v

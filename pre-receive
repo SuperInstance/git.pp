@@ -22,13 +22,55 @@ stale()  { # has body $1 gone a full lease without a heartbeat?
   [ -n "$lease" ] && [ $(($(date +%s) - ${seen:-0})) -gt "$lease" ]
 }
 
+# Every line of a judgment-log file must parse as v0 (7 fields) or v2 (9+ fields):
+#   ts subject question judge neg zero pos [sel prop [key=value ...]]
+JLINE='
+function hex(s) { return (length(s) == 40 || length(s) == 64) && s !~ /[^0-9a-f]/ }
+function prob(s) { return s ~ /^(0(\.[0-9]+)?|1(\.0+)?)$/ }
+function bad(why) { print "rejected: " P " line " FNR ": " why | "cat 1>&2"; err = 1; exit }
+{ if (NF != 7 && NF < 9) bad("expected 7 or 9+ tab-separated fields, got " NF)
+  if ($1 !~ /^[0-9][0-9][0-9][0-9]-[01][0-9]-[0-3][0-9]T[0-2][0-9]:[0-5][0-9]:[0-6][0-9](Z|[+-][0-9][0-9]:?[0-9][0-9])?$/) bad("timestamp")
+  if (!hex($2) || !hex($3)) bad("subject and question must be blob hashes")
+  if (NF == 7 ? $4 !~ /^[A-Za-z0-9._-]+$/ : !hex($4)) bad("judge")
+  if (!prob($5) || !prob($6) || !prob($7)) bad("probabilities")
+  s = $5 + $6 + $7; if (s < 0.999 || s > 1.001) bad("probabilities sum to " s)
+  if (NF == 7) next
+  if ($8 !~ /^(stream|shadow|explore|audit|drill|appeal|flag)$/) bad("sel")
+  if (!prob($9) || $9 + 0 <= 0) bad("prop must be in (0, 1]")
+  for (i = 10; i <= NF; i++) if ($i !~ /^[a-z][a-z0-9_]*=./) bad("extra field " i) }
+END { if (!err && NR == 0) { print "rejected: " P ": empty batch" | "cat 1>&2"; err = 1 }
+      exit err }'
+
+log_ref() { # a body's perception: its own root, append-only, add-only files, signed by that body
+  b=${ref#refs/log/judgments/}
+  [ "$new" != "$Z" ] || no "$ref: judgment logs are never deleted"
+  if [ "$old" = "$Z" ]; then
+    [ "$(git rev-list --count "$new")" = "$(git rev-list --count "$new" --not --all)" ] ||
+      no "$ref: a judgment log must start from its own root"
+    range=$new
+  else
+    git merge-base --is-ancestor "$old" "$new" || no "$ref: judgment logs are append-only"
+    range="$old..$new"
+  fi
+  for c in $(git rev-list --reverse $range); do
+    ! has "$c^2" || no "$c: merge commit"
+    [ "$(signer "$c" refs/heads/main)" = "$b" ] || no "$c: not signed by $b"
+    git diff-tree -r --root --no-renames --no-commit-id --raw "$c" | while read -r _ _ _ blob st path; do
+      [ "$st" = A ] || no "$c: $path: judgment files are only ever added"
+      case $path in *[!A-Za-z0-9._/-]*) no "$c: $path: unsafe name" ;; *.tsv) ;; *) no "$c: $path: not a .tsv batch file" ;; esac
+      git cat-file blob "$blob" | ${AWK:-awk} -F'\t' -v P="$path" "$JLINE" || exit 1
+    done || exit 1
+  done
+}
+
 while read -r old new ref; do
   case $ref in
     refs/heads/main) ;;
     refs/heartbeat/*)   # liveness: overwritable, but only by the body it names
       [ "$(signer "$new" refs/heads/main)" = "${ref#refs/heartbeat/}" ] || no "$ref: not signed by its body"
       continue ;;
-    *) no "$ref: only main and heartbeats exist" ;;
+    refs/log/judgments/*) log_ref; continue ;;
+    *) no "$ref: only main, heartbeats and judgment logs exist" ;;
   esac
 
   # RULE 2 -- main only moves forward. This is the compare-and-swap every claim relies on.

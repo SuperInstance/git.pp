@@ -138,8 +138,10 @@ thousands of commits.
 
 ## Layer 3: perception
 
-**Status: v0 live in `jev-semantic` (local TSV file, not yet in git). v2 schema, writer and
-hook rule specified here; see the build order.**
+**Status: v0 live in `jev-semantic` (a local TSV file, not yet in git). v2 built and tested
+here: `jlog.py` writes and reads per-body log refs, and `pre-receive` enforces the rules below;
+`test-log.sh` passes 23 checks under mawk, gawk and busybox awk, including agreement between the
+hook and `jlog.py` on 16 valid and invalid lines.**
 
 ### The judges
 
@@ -465,7 +467,7 @@ where people or other systems are the environment.
 |---|---|---|---|
 | 1 | Substrate: tick, pre-receive | **Built, 57 checks** | — |
 | 2 | Projection: axes, projector, post-receive | **Built, 40 checks** | — |
-| 3 | Log v2: schema, writer to per-body refs, hook rule | Next | A backfill writes the live log to refs; a push that edits a line is rejected; v0 and v2 both parse |
+| 3 | Log v2: schema, writer to per-body refs, hook rule | **Built, 23 checks** (`jlog.py`, `pre-receive`) | Remaining: backfill the live v0 log from `~/judgment-log.tsv` with `jlog.py append` |
 | 4 | Audit stream: commit-reveal selector, blind tasks, fault drills | Next | A revealed seed reproduces the exact selection from the log, including suppressed items |
 | 5 | Shadow judgments and exploration | Next | Every escalation produces a `sel=shadow` line; exploration logs `prop` |
 | 6 | Region gate | Next | Unaudited regions never act; the bound matches the audit tables; thresholds move with outcomes |
