@@ -18,13 +18,15 @@ clone() { git clone -q "$R" "$W/$1" 2>/dev/null || git init -q -b main "$W/$1"
   git -C "$W/$1" config user.name "$2"; git -C "$W/$1" config user.email "$2@agent"; }
 git init -q --bare -b main "$R"
 clone seed casey; cd "$W/seed"; git remote add origin "$R" 2>/dev/null
-mkdir soul questions; for k in casey oracle laptop; do echo "$k $(cut -d' ' -f1,2 "$W/keys/$k.pub")"; done > soul/allowed_signers
+mkdir soul questions judges; for k in casey oracle laptop; do echo "$k $(cut -d' ' -f1,2 "$W/keys/$k.pub")"; done > soul/allowed_signers
 printf 'owner: casey\nlease: 3600\n' > soul/policy; printf 'Is this good?\n' > questions/root.md
+printf 'name: student\nkind: student\nrole: judge\n' > judges/student.md
+printf 'name: casey\nkind: human\nrole: labeller\n' > judges/casey.md
 for i in $(seq 1 400); do echo "item $i" > "item-$i"; done   # contents the judge will look at
 git add -A; git commit -qS -m genesis; git push -q origin main
 cp "$HERE/pre-receive" "$R/hooks/pre-receive"; chmod +x "$R/hooks/pre-receive"
 for b in oracle laptop casey; do clone "$b" "$b"; done
-Q=$(rgit rev-parse main:questions/root.md); JU=$(printf 'name: student\n' | git hash-object --stdin)
+Q=$(rgit rev-parse main:questions/root.md); JU=$(rgit rev-parse main:judges/student.md); JC=$(rgit rev-parse main:judges/casey.md)
 
 # the judge logs 400 verdicts: items 1-200 confidently negative (suppressed), 201-400 positive
 python3 - "$HERE" "$W/laptop/batch" "$Q" "$JU" <<'PY'
@@ -60,7 +62,45 @@ same "select is idempotent"           "$($A select --period p1 --auditor oracle 
 yes  "oracle reveals"                 $A reveal --period p1 --auditor oracle
 cd "$W/casey"; yes "anyone can verify" $A verify --period p1 --auditor oracle
 
-echo "2. what verification catches"
+echo "2. blind labels flow into the ledger and the gate"
+# the truth: items 1-100 really are bad, 101-400 are good, so the judge is wrong on 101-200
+cd "$W/casey"; git fetch -q origin
+for t in $(rgit ls-tree --name-only main inbox/ | grep audit-p1-); do rgit show "main:$t"; echo "@@"; done > tasks
+python3 - "$HERE" "$Q" "$JC" tasks > labels <<'PY'
+import sys, subprocess; sys.path.insert(0, sys.argv[1]); import jlog
+truth = {}
+for i in range(1, 401):
+    s = subprocess.run(["git", "hash-object", "--stdin"], input=("item %d\n" % i).encode(), capture_output=True).stdout.decode().strip()
+    truth[s] = (1, 0, 0) if i <= 100 else (0, 0, 1)
+for task in open(sys.argv[4]).read().split("@@"):
+    f = dict(l.split(": ", 1) for l in task.splitlines() if l.startswith(("subject: ", "rate: ")))
+    if f:
+        print(jlog.format_line(f["subject"], sys.argv[2], sys.argv[3], truth[f["subject"]], "audit", float(f["rate"]),
+                               seed="p1", blind="1"))
+PY
+yes  "the labeller logs blind labels" $J append --body casey labels
+out=$(python3 - "$HERE" "$JU" "$Q" <<'PY'
+import os, sys; sys.path.insert(0, sys.argv[1]); import jlog, ledger, gate
+repo = os.getcwd(); jlog.git(repo, "fetch", "-q", "origin", "+refs/heads/main:refs/remotes/origin/main")
+roles = {h: m.get("role", "judge") for h, m in ledger.manifests(repo).items()}
+led = ledger.Ledger(jlog.iter_log(repo), roles)
+row = led.table()[(sys.argv[2], sys.argv[3], "all")]
+rec = led.gate_record(sys.argv[2], sys.argv[3])
+qh = led.qhats(sys.argv[2], sys.argv[3], alpha=0.05)
+neg = gate.decide((0.9, 0.05, 0.05), ["all"], rec, qh, accept=0.10)
+pos = gate.decide((0.05, 0.05, 0.9), ["all"], rec, qh, accept=0.10)
+n_neg, w_neg = rec[("all", -1)]; n_pos, w_pos = rec[("all", 1)]
+print(row["n"], round(w_neg / n_neg, 2), w_pos, neg.action, pos.action)
+PY
+)
+set -- $out
+yes  "every label scored the judge ($1 resolved)" [ "$1" -ge 70 ]
+yes  "its negative verdicts are wrong about half the time ($2)" python3 -c "assert 0.3 < $2 < 0.7"
+same "its positive verdicts were never wrong" "$3" 0
+same "the gate escalates new negative verdicts" "$4" escalate
+same "and acts on positive ones" "$5" act
+
+echo "3. what verification catches"
 cd "$W/laptop"                                       # backdated judgments after the reveal change nothing
 python3 - "$HERE" "$Q" "$JU" > late <<'PY'
 import sys; sys.path.insert(0, sys.argv[1]); import jlog, hashlib

@@ -260,7 +260,11 @@ verified like a view.
 
 ## Layer 5: gates
 
-**Status: designed here; a reference implementation is in the build order.**
+**Status: built and tested here.** `gate.py` (decision, bound, conformal sets, exploration,
+pricing) and `ledger.py` (track records) have 26 unit tests between them; `test-audit.sh` runs
+the full loop against the real hook: a judge logs 400 verdicts, the audit stream selects about a
+quarter blind, a human labels them, the ledger scores the judge, and the gate then escalates the
+verdict kind the audits found unreliable while acting on the kind they confirmed.
 
 A gate decides, for each judgment, whether to act on it, hold, or escalate. The research
 overturned two parts of the earlier design and formalized the rest.
@@ -282,6 +286,10 @@ bound of 1, so the gate never acts there: untrusted until audited, with a stated
   the traffic.
 - **Drift.** Each region's threshold moves online with its audit outcomes (adaptive conformal
   inference), with no retraining.
+- **One threshold per region and per verdict.** The conformal threshold is calibrated
+  separately for each kind of top verdict (Mondrian conformal). With a single threshold per
+  region, a judge that is unreliable on its −1 verdicts blurred its reliable +1 verdicts into
+  "unsure" as well; the end-to-end test caught this.
 - **Neutral versus unknown.** The gate acts only when the verdict is a single label. A confident
   0 is a verdict, "nothing here". Spread mass is "I don't know". Folding both into the middle
   class conflates them.
@@ -319,7 +327,8 @@ Three mechanisms keep labels flowing into the regions the gate avoids:
 
 ## Layer 6: independence
 
-**Status: designed here; a reference implementation is in the build order.**
+**Status: the audit stream (`audit.py`) and track records (`ledger.py`) are built and tested
+here; the polarization monitor and ship gate are next.**
 
 Independence is the scarce input. This layer mints it cheaply, spends it where information is
 worth most, and records where it came from.
@@ -477,9 +486,9 @@ where people or other systems are the environment.
 | 2 | Projection: axes, projector, post-receive | **Built, 40 checks** | — |
 | 3 | Log v2: schema, writer to per-body refs, hook rule | **Built, 23 checks** (`jlog.py`, `pre-receive`) | Remaining: backfill the live v0 log from `~/judgment-log.tsv` with `jlog.py append` |
 | 4 | Audit stream: commit-reveal selector, blind tasks, fault drills | **Selector built, 17 checks** (`audit.py`) | Remaining: fault drills, which need resolved audits from the track-record piece |
-| 5 | Shadow judgments and exploration | Next | Every escalation produces a `sel=shadow` line; exploration logs `prop` |
-| 6 | Region gate | Next | Unaudited regions never act; the bound matches the audit tables; thresholds move with outcomes |
-| 7 | Track records and routing | Next | Every judge and reviewer has a Brier score per region; routing picks the lower expected loss |
+| 5 | Shadow judgments and exploration | **Built** (`gate.py` exploration; `ledger.py` reads shadow and appeal lines) | Remaining: wire into the tick's executor so every escalation logs its `sel=shadow` line |
+| 6 | Region gate | **Built, unit and end-to-end tests** (`gate.py`) | Bound reproduces the audit table (60 clean items: 4.9%; 150: 2.0%; 60 with one error: 7.7%) |
+| 7 | Track records and routing | **Built** (`ledger.py`, `gate.choose`) | Remaining: reviewer Brier trends over time as the deskilling alarm |
 | 8 | Ship gate | Next | A synthetic update that breaks one cluster is blocked despite a positive net change |
 | 9 | Window compiler v1 | Partly built (`window.py`) | Briefs are byte-identical on a second body and stored with results |
 | 10 | Agent harness v2: charter, consolidation, commitments as forecasts | Designed | An agent's commitments resolve into the scoring ledger |
