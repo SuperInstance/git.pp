@@ -7,8 +7,8 @@ export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null   # ignore the ho
 mkdir -p "$W/keys"; pass=0; fail=0
 ok()   { pass=$((pass+1)); echo "  ok    $1"; }
 bad()  { fail=$((fail+1)); echo "  FAIL  $1"; }
-yes()  { n=$1; shift; if "$@" >/dev/null 2>&1; then ok "$n"; else bad "$n"; fi; }
-not()  { n=$1; shift; if "$@" >/dev/null 2>&1; then bad "$n"; else ok "$n"; fi; }
+yes()  { _t=$1; shift; if "$@" >/dev/null 2>&1; then ok "$_t"; else bad "$_t"; fi; }
+not()  { _t=$1; shift; if "$@" >/dev/null 2>&1; then bad "$_t"; else ok "$_t"; fi; }
 same() { if [ "$2" = "$3" ]; then ok "$1"; else bad "$1"; printf '        want: %s\n        got:  %s\n' "$3" "$2"; fi; }
 R="$W/remote.git"; rgit() { git -C "$R" "$@"; }
 J="python3 $HERE/jlog.py"
@@ -47,6 +47,11 @@ same "main is untouched"              "$(rgit rev-parse main)" "$MAIN"
 cd "$W/laptop"; yes "laptop appends its own" sh -c "printf '%s\n' '$L2' | $J append --body laptop"
 same "cat reads every body, in order" "$(cd "$W/laptop" && $J cat | cut -f1,3 | tr '\t\n' ': ')" "laptop:$S2 oracle:$S1 oracle:$S2 oracle:$S1 "
 same "cat can pick one body"          "$(lines laptop oracle)" 3
+
+L3=$(printf '2026-10-08T09:00:00\t%s\t%s\tintuition-student-v1\t0.2000\t0.3000\t0.5000' "$S2" "$Q")
+cd "$W/oracle"; printf '%s\n%s\n%s\n%s\n' "$L0" "$L1" "$L3" "$L3" > local.tsv   # a local log: two lines already pushed, one new twice
+out=$($J sync --body oracle local.tsv); same "sync appends only what the log lacks" "$(lines oracle oracle)" 4
+same "and is a no-op the second time" "$($J sync --body oracle local.tsv)" "up to date"
 
 echo "2. what the hook refuses"
 cd "$W/laptop"; T=$(logtip oracle)

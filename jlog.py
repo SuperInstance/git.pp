@@ -6,6 +6,9 @@
   jlog.py cat [--no-fetch] [--remote R] [BODY...]  print every line of every log (or the named
                                                     bodies' logs) as body<TAB>line, oldest first
   jlog.py validate [FILE]                          check lines without writing anything
+  jlog.py sync --body ID FILE                      append the lines of FILE that the body's log
+                                                    does not hold yet (for migrating a local
+                                                    v0 log, e.g. ~/judgment-log.tsv, by cron)
 
 Line format, tab-separated (ARCHITECTURE.md, layer 3):
   v2:  ts subject question judge neg zero pos sel prop [key=value ...]
@@ -68,6 +71,15 @@ def parse(line):
         return Judgment(f[0], f[1], f[2], f[3], p, "stream", 1.0, {})
     extra = dict(x.split("=", 1) for x in f[9:])
     return Judgment(f[0], f[1], f[2], f[3], p, f[7], float(f[8]), extra)
+
+
+def utc(ts):
+    """A judgment timestamp as naive UTC 'YYYY-MM-DDTHH:MM:SS' (v0 lines carry no zone: read as UTC)."""
+    from datetime import datetime, timezone
+    d = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+    if d.tzinfo:
+        d = d.astimezone(timezone.utc).replace(tzinfo=None)
+    return d.strftime("%Y-%m-%dT%H:%M:%S")
 
 
 def format_line(subject, question, judge, p, sel="stream", prop=1.0, ts=None, **extra):
@@ -146,26 +158,41 @@ def append(repo, body, lines, remote="origin", retries=5):
     raise RuntimeError("could not append after %d attempts" % retries)
 
 
-def iter_log(repo, bodies=None, remote="origin", fetch=True):
-    """Yield (body, line) for every line in the logs, each body's batches oldest first."""
+def log_tips(repo, remote="origin", fetch=True):
+    """{body: commit} for every judgment log, after fetching them all."""
     if fetch:
         git(repo, "fetch", "-q", remote, "+refs/log/judgments/*:refs/log/judgments/*")
-    refs = git(repo, "for-each-ref", "--format=%(refname)", "refs/log/judgments/").split()
-    for ref in refs:
-        body = ref.rsplit("/", 1)[1]
+    out = git(repo, "for-each-ref", "--format=%(refname) %(objectname)", "refs/log/judgments/")
+    return {r.rsplit("/", 1)[1]: c for r, c in (l.split() for l in out.splitlines())}
+
+
+def iter_log(repo, bodies=None, remote="origin", fetch=True, with_time=False, tips=None, since=None):
+    """Yield (body, line) for every line in the logs, each body's batches oldest first.
+    With with_time, yield (body, commit_time, line): when the batch reached the log.
+    With tips ({body: commit}), read each log only up to that commit: the logs as they stood then.
+    With since ({body: commit}), skip what each log held at that commit: only what was added."""
+    tips = tips if tips is not None else log_tips(repo, remote, fetch)
+    for body in sorted(tips):
+        ref = tips[body]
         if bodies and body not in bodies:
             continue
-        raw = git(repo, "log", "--reverse", "--no-renames", "--root", "--raw", "--no-abbrev", "--format=C %H", ref)
-        blobs = [l.split()[3] for l in raw.splitlines() if l.startswith(":")]
+        rng = "%s..%s" % (since[body], ref) if since and body in since else ref
+        raw = git(repo, "log", "--reverse", "--no-renames", "--root", "--raw", "--no-abbrev", "--format=C %ct", rng)
+        blobs, times, t = [], [], 0
+        for l in raw.splitlines():
+            if l.startswith("C "):
+                t = int(l.split()[1])
+            elif l.startswith(":"):
+                blobs.append(l.split()[3]); times.append(t)
         if not blobs:
             continue
         out = git(repo, "cat-file", "--batch", data=("\n".join(blobs) + "\n").encode())
         pos = 0
-        for _ in blobs:
+        for t in times:
             nl = out.index("\n", pos)
             size = int(out[pos:nl].split()[2])
             for line in out[nl + 1:nl + 1 + size].splitlines():
-                yield body, line
+                yield (body, t, line) if with_time else (body, line)
             pos = nl + 2 + size
 
 
@@ -181,7 +208,7 @@ def main(argv):
             opts["novalidate"] = True
         else:
             args.append(a)
-    if not args or args[0] not in ("append", "cat", "validate"):
+    if not args or args[0] not in ("append", "cat", "validate", "sync"):
         print(__doc__.strip(), file=sys.stderr)
         return 2
     cmd, rest = args[0], args[1:]
@@ -202,8 +229,14 @@ def main(argv):
         return 0
     body = opts.get("body") or os.environ.get("AGENT_ID")
     if not body:
-        print("append needs --body or AGENT_ID", file=sys.stderr)
+        print("%s needs --body or AGENT_ID" % cmd, file=sys.stderr)
         return 2
+    if cmd == "sync":
+        held = {l for b, l in iter_log(repo, [body], opts["remote"])}
+        lines = [l for l in dict.fromkeys(l for l in lines if l.strip()) if l not in held]
+        if not lines:
+            print("up to date")
+            return 0
     print(append(repo, body, lines, opts["remote"]))
     return 0
 

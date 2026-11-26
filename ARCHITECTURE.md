@@ -77,8 +77,10 @@ A body is a keypair, a manifest and a tick. The agent's identity is the repo, no
 
 ## Layer 1: the substrate
 
-**Status: built and tested here.** `tick.sh` (85 lines of code), `pre-receive` (48), `test.sh`
-(57 checks, passing under dash and bash).
+**Status: built and tested here.** `tick.sh`, `pre-receive`, `test.sh` (61 checks, passing
+under dash and bash). `agent-exec.sh` is a reference executor: it compiles the task's window,
+hands it to the agent command, and keeps it beside the result; the tick then records the
+window's blob hash as a `Window:` trailer on the done commit.
 
 The tick is a pure function: `tick(tree@main, capabilities) -> signed commits`. A body holds
 nothing between ticks; after a kill anywhere, recovery is fetch and hard reset. The five rules,
@@ -129,12 +131,21 @@ after every push to main.
 A view commit is a pure function of the source commit: fixed author, the source's date, no
 signature. Any body can recompute it with the projector stored in that same commit and compare
 one hash; `project.sh verify` does this and refuses any source not on trusted main before
-running its projector. The nexus (`by-hash`) maps every blob ever seen to every commit and path
+running its projector. "Trusted main" is followed through signatures, exactly as a tick follows
+it: a fresh clone trusts only the genesis commit and checks every signature from there. The nexus (`by-hash`) maps every blob ever seen to every commit and path
 where it appeared.
 
-Measured cost: a rebuild after one push took 0.3 s at 1,500 commits, 0.9 s at 6,000 and 19 s at
-60,000, and the pusher waits for it. It must become incremental before history reaches tens of
-thousands of commits.
+Measured cost: a full rebuild took 0.3 s at 1,500 commits, 0.9 s at 6,000 and 19–23 s at 60,000,
+and the pusher waits for it. So publishing now extends the history views instead: the new
+commits' cells are built on their own and merged into the published trees, visiting only the
+subtrees they land in. At 60,000 commits one push now costs 2.7 s instead of 23 s, with an
+identical result. Verification always rebuilds from nothing, so an extension that differed would
+fail publicly; `test-pp-inc.sh` checks extension against a full rebuild after every push of a
+random history (including an axes change midway, which forces a rebuild).
+
+That property test found one real bug on the way: awk compared the bucket name `00` with an empty
+variable numerically, treated them as equal, and the merge dropped the whole `00` bucket. All
+name comparisons in the projector are now forced to strings, with a regression test.
 
 ## Layer 3: perception
 
@@ -237,7 +248,10 @@ gives the complete list of items it changed its mind about, with no noise.
 
 ## Layer 4: the window compiler
 
-**Status: v0 built in `jev-semantic` (`window.py`). The full design is below.**
+**Status: v1 built and tested here (`window.py`, 16 checks in `test-window.sh`).** It reads
+the judgment-log refs and the ledger instead of a local file, pins the main commit and every log
+tip in its header, and reproduces an earlier window byte for byte on any body when given those
+pins. `jev-semantic`'s `window2.py` is the v0 it supersedes.
 
 The compiler turns a task into a brief: the dense local context an agent needs, compiled
 rather than searched. It is a pure function of pinned inputs, so a brief can be reproduced and
@@ -252,15 +266,22 @@ verified like a view.
 4. **Judgments:** the latest line per (subject, question, judge, body), each tagged settled,
    conflict, ignorance, disagreement or stale.
 5. **Questions:** map hashes to paths, pull ancestors, count settled and open per question.
-6. **Precedents:** done tasks linked to the zone, with outcomes. Bad outcomes rank first.
-7. **Budget:** fixed space per section; overflow counted under "Not shown".
-8. **Stamp:** write the pinned commits in the header, store the brief as
+6. **Recently heard:** the newest lines from outside voices (labellers, world judges, appeals),
+   verbatim and marked when they touch the zone. The judges' summaries above are inferences; this
+   is what a person or the world actually said, so the agent can tell the two apart.
+7. **Precedents:** done tasks linked to the zone, with outcomes. Bad outcomes rank first.
+8. **Budget:** fixed space per section; overflow counted under "Not shown".
+9. **Stamp:** write the pinned commits in the header, store the brief as
    `done/<task>/window.md`, and put a `Window:` trailer on the result commit. "What did the agent
    know when it acted?" is then one `git show`.
 
 ## Layer 5: gates
 
-**Status: designed here; a reference implementation is in the build order.**
+**Status: built and tested here.** `gate.py` (decision, bound, conformal sets, exploration,
+pricing) and `ledger.py` (track records) have 26 unit tests between them; `test-audit.sh` runs
+the full loop against the real hook: a judge logs 400 verdicts, the audit stream selects about a
+quarter blind, a human labels them, the ledger scores the judge, and the gate then escalates the
+verdict kind the audits found unreliable while acting on the kind they confirmed.
 
 A gate decides, for each judgment, whether to act on it, hold, or escalate. The research
 overturned two parts of the earlier design and formalized the rest.
@@ -282,6 +303,10 @@ bound of 1, so the gate never acts there: untrusted until audited, with a stated
   the traffic.
 - **Drift.** Each region's threshold moves online with its audit outcomes (adaptive conformal
   inference), with no retraining.
+- **One threshold per region and per verdict.** The conformal threshold is calibrated
+  separately for each kind of top verdict (Mondrian conformal). With a single threshold per
+  region, a judge that is unreliable on its −1 verdicts blurred its reliable +1 verdicts into
+  "unsure" as well; the end-to-end test caught this.
 - **Neutral versus unknown.** The gate acts only when the verdict is a single label. A confident
   0 is a verdict, "nothing here". Spread mass is "I don't know". Folding both into the middle
   class conflates them.
@@ -308,6 +333,19 @@ expected error with the expert's expected error on that kind of item; escalating
 is also bad in that region buys nothing. The gate therefore routes on the difference between
 track records, which only blind audits that score the humans can supply.
 
+`gatekeep.py` is the operator that applies all of this to one judgment: it decides, logs the
+judgment with `sel`, `prop`, the decision, the item's regions and a hash of the gate
+configuration, and turns an escalation into a review task that shows the student's verdict
+(fault drills look exactly the same). Recording regions on the line means the ledger never has
+to guess later where an old item belonged.
+
+Cost: the operator rebuilds the ledger from the logs on each run, so it should be called in
+batches (`--batch`), once per tick. On a synthetic log of a million lines with 20,000 audited
+items, building the ledger took 6.6 s and computing the gate's records and thresholds 0.3 s.
+Caching the built ledger with pickle did not help (267 MB, 7.3 s to load); beyond a few million
+lines the next step is the SQLite cache measured for the log itself (5–8 ms per 200-subject
+lookup at 1–10M lines).
+
 Three mechanisms keep labels flowing into the regions the gate avoids:
 
 - **Shadow judgments:** the student's verdict is logged on every escalated item (`sel=shadow`),
@@ -319,7 +357,12 @@ Three mechanisms keep labels flowing into the regions the gate avoids:
 
 ## Layer 6: independence
 
-**Status: designed here; a reference implementation is in the build order.**
+**Status: built and tested here.** The audit stream and fault drills (`audit.py`), track
+records and the labeller trend (`ledger.py`), and the ship gate with churn, verdict diff,
+polarization monitor and drift decomposition (`shipgate.py`). `test-audit.sh` (28 checks) runs
+them against the real hook; unit tests cover the rest. `shipgate.py` also compares gate
+configurations (`canary`), measures a candidate labeller's independence from a judge
+(`independence`), and names every consumer listed in `soul/consumers` in its reports.
 
 Independence is the scarce input. This layer mints it cheaply, spends it where information is
 worth most, and records where it came from.
@@ -335,9 +378,17 @@ An auditor body (the Oracle) selects items for audit with a secret seed committe
    verdict, so suppressed and abstained items are sampled at the same rate as acted ones.
 3. Drop each selected item into `inbox/` as a blind task: the labeller sees the content and the
    question, not the verdicts.
-4. At the end of the period, commit `bodies/<auditor>/audit/<period>.reveal` with the seed.
-   Anyone can check it against the commitment and recompute the full selection from the log,
-   which proves nothing selected was skipped and nothing was cherry-picked.
+4. At the end of the period, commit `bodies/<auditor>/audit/<period>.reveal` with the seed and
+   the tip of every judgment log at that moment. Anyone can check the seed against the
+   commitment and recompute the full selection from the logs as they stood at the reveal, which
+   proves nothing selected was skipped and nothing was cherry-picked. Lines appended later,
+   backdated or not, cannot change the result.
+
+`audit.py` implements all four steps plus `verify`. `test-audit.sh` (17 checks, against the real
+hook) confirms that about the configured share of items is selected, that negative (suppressed)
+verdicts are sampled at the same rate as positive ones, that tasks never show a verdict, and that
+verification catches an auditor who skipped items, one who added a hand-picked item, and a seed
+swapped after the fact.
 
 Judges cannot predict which of their verdicts will be audited, because the seed is secret until
 the period closes. Strata may oversample hard or novel regions; each label carries its stratum
@@ -355,9 +406,10 @@ their score. One unit of attention buys:
 - **calibration training** (under an hour of Brier feedback improved forecasters by 6–11%);
 - **an unbiased label** for the judges.
 
-Audit sets also carry **fault drills** (`sel=drill`): items where the student is known to be
-wrong, shown with its verdict. They test directly whether reviewers still catch a faulty
-instrument, the skill that decays first. In a simulator, 75% of experienced pilots followed a
+Audit sets also carry **fault drills**: items where the student is known to be wrong, shown
+with its verdict in a review task that looks like any other. They test directly whether reviewers still catch a faulty
+instrument, the skill that decays first. The drill list stays secret until the period's reveal;
+`audit.py drills` then reports each reviewer's catch rate. In a simulator, 75% of experienced pilots followed a
 faulty altimeter; experienced endoscopists' unassisted detection rate fell from 28.4% to 22.4%
 within about three months of AI assistance.
 
@@ -411,7 +463,9 @@ A new student or rubric ships through a gate that reads the log:
 
 ## Layer 7: the agent
 
-**Status: designed here; the harness pieces are in the build order.**
+**Status: built and tested here.** Commitments as forecasts (`forecast.py`, 7 checks), the
+compiled memory page (`consolidate.py`, 15 checks), and the charter and memory read first in
+every window (`window.py`).
 
 An agent here is a model plus three harnesses: a way to hear, a way to remember, and a way to
 make. It needs no code execution. The research supports three load-bearing constraints and adds
@@ -427,13 +481,21 @@ two:
 
 What this means for the repo:
 
-- **Two strata.** The raw log of what was heard and made is never rewritten. Consolidations are
-  ordinary commits that revise summary files, made in idle time. Each window includes a verbatim
-  slice of outside input as well as the summaries.
+- **Two strata.** The raw log of what was heard and made is never rewritten. Above it,
+  `consolidate.py` compiles `bodies/<agent>/memory.md`: tasks finished (failures first, each with
+  its last log line), forecasts and how the world resolved them with the agent's Brier score,
+  what the gate did with its judgments, and where a person or the world resolved its verdicts
+  the other way. The page is compiled, not written: it carries its pins, and `verify` recomputes
+  it, so an agent cannot remember itself more kindly than the record allows (the test edits
+  "1 failed" to "0 failed" and verify refuses). A model-written reflection is a separate task
+  whose window includes the page, and its output is judged like any other. Each window shows the
+  memory after the charter, plus a verbatim slice of outside input.
 - **A charter** in the agent's directory, versioned like everything else.
 - **Commitments as forecasts.** Each thing the agent makes registers the question that will
   resolve it, so the hearing channel closes the loop with an outcome and the agent enters the
-  same scoring ledger as the judges.
+  same scoring ledger as the judges. `forecast.py` does this: the question lives at
+  `bodies/<agent>/forecasts/<name>.md`, the agent's probability goes on its own log, and only a
+  `world` judge may log the outcome. `test-forecast.sh` (7 checks) runs it end to end.
 - **The Jev as the agent's fast check.** A 7 ms judge gives a no-execution agent feedback faster
   than any human. It counts as outside correction only to the extent it is calibrated against
   the world and comes from a different lineage than the agent's model.
@@ -468,13 +530,13 @@ where people or other systems are the environment.
 | 1 | Substrate: tick, pre-receive | **Built, 57 checks** | — |
 | 2 | Projection: axes, projector, post-receive | **Built, 40 checks** | — |
 | 3 | Log v2: schema, writer to per-body refs, hook rule | **Built, 23 checks** (`jlog.py`, `pre-receive`) | Remaining: backfill the live v0 log from `~/judgment-log.tsv` with `jlog.py append` |
-| 4 | Audit stream: commit-reveal selector, blind tasks, fault drills | Next | A revealed seed reproduces the exact selection from the log, including suppressed items |
-| 5 | Shadow judgments and exploration | Next | Every escalation produces a `sel=shadow` line; exploration logs `prop` |
-| 6 | Region gate | Next | Unaudited regions never act; the bound matches the audit tables; thresholds move with outcomes |
-| 7 | Track records and routing | Next | Every judge and reviewer has a Brier score per region; routing picks the lower expected loss |
-| 8 | Ship gate | Next | A synthetic update that breaks one cluster is blocked despite a positive net change |
-| 9 | Window compiler v1 | Partly built (`window.py`) | Briefs are byte-identical on a second body and stored with results |
-| 10 | Agent harness v2: charter, consolidation, commitments as forecasts | Designed | An agent's commitments resolve into the scoring ledger |
+| 4 | Audit stream: commit-reveal selector, blind tasks, fault drills | **Built, 28 end-to-end checks** (`audit.py`) | — |
+| 5 | Shadow judgments, exploration, bypass slice | **Built** (`gatekeep.py`): every decision is logged with why, regions and a configuration hash; escalations become review tasks; `agent-exec.sh` gates whatever the agent judged during a task as one batch and keeps `gate.jsonl` with the result | — |
+| 6 | Region gate | **Built, unit and end-to-end tests** (`gate.py`) | Bound reproduces the audit table (60 clean items: 4.9%; 150: 2.0%; 60 with one error: 7.7%) |
+| 7 | Track records and routing | **Built** (`ledger.py`, `gate.choose`), including each labeller's weekly Brier against world outcomes | — |
+| 8 | Ship gate | **Built, unit tests** (`shipgate.py`): a release that nets +5 in a region but breaks 5 items there is blocked; a gate configuration that acts on more wrong verdicts is blocked; a labeller that errs where the judge errs is flagged | — |
+| 9 | Window compiler v1 | **Built, 16 checks** (`window.py`): charter, task, judgments, a verbatim slice of outside voices, open questions, precedents with failures first, pins; `agent-exec.sh` stores each window with its result and the tick records its hash as a `Window:` trailer | — |
+| 10 | Agent harness v2: charter, consolidation, commitments as forecasts | **Built**: forecasts (`forecast.py`, 7 checks); the window compiler puts the charter first and shows recent outside input verbatim; memory pages compiled by `consolidate.py` (15 checks) and read first in every window | — |
 | 11 | Ensembles and density scores | Deferred | Adopted only where audits show plain confidence ranks errors poorly |
 
 ## Experiments only this system can run cheaply
